@@ -41,6 +41,7 @@ class DashboardTests(unittest.TestCase):
         self.ids.update({
             "live_test_status": "sensor.live_test_status",
             "automatic_charge_mode": "select.automatic_charge_mode",
+            "public_charging_mode": "switch.public_charging_mode",
             "automatic_charge_decision": "sensor.automatic_charge_decision",
             "live_test_armed": "switch.live_test_armed",
             "live_test_target": "number.live_test_target",
@@ -119,6 +120,11 @@ class DashboardTests(unittest.TestCase):
             "select.climate_slot_1_driver_seat",
             [r["entity"] for r in slots[0]["entities"] if "entity" in r],
         )
+
+    def test_public_charging_mode_visible(self):
+        charging = self.config["views"][0]["sections"][0]["cards"]
+        self.assertIn("switch.public_charging_mode", str(charging))
+        self.assertNotIn("Home confirmed", str(charging))
 
     def test_live_manual_test_requires_explicit_user_button(self):
         sections = self.config["views"][0]["sections"]
