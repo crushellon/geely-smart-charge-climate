@@ -35,6 +35,7 @@ async def async_setup_entry(
         GeelyObservationSensor(hass, entry),
         GeelySimulationSensor(hass, entry),
         ClimateNextSessionSensor(hass, entry),
+        LiveTestStatusSensor(entry),
     ])
 
 
@@ -281,3 +282,41 @@ class ClimateNextSessionSensor(SensorEntity):
         self.async_on_remove(
             async_track_time_interval(self.hass, minute_tick, timedelta(minutes=1))
         )
+
+
+class LiveTestStatusSensor(SensorEntity):
+    """Observable state of the opt-in manual test controller."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Live test status"
+    _attr_icon = "mdi:shield-car"
+
+    def __init__(self, entry):
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_live_test_status"
+
+    @property
+    def native_value(self):
+        return self.entry.runtime_data.status
+
+    @property
+    def extra_state_attributes(self):
+        live = self.entry.runtime_data
+        return {
+            "message": live.message,
+            "armed": live.armed,
+            "owns_session": live.owned,
+            "manual_target": live.target,
+            "active_target": live.active_target,
+            "vehicle_commands_sent_by_simulation": False,
+            "automatic_scheduling_enabled": False,
+            "plug_state": live._raw(live.plug),
+            "legacy_controller_state": live._raw("input_boolean.ev_controller_enabled"),
+            "legacy_automation_state": live._raw("binary_sensor.ev_legacy_charging_controllers_active"),
+            "public_charging_mode": live._raw("input_boolean.ev_public_charging_mode"),
+            "preflight": live.preflight(),
+        }
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self.async_on_remove(self.entry.runtime_data.listen(self.async_write_ha_state))
