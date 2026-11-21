@@ -45,6 +45,9 @@ class LiveChargeController:
         self.charging_power = (entry.data.get(CONF_CHARGING_POWER)
                                or discover_charging_power_entity(hass, self.battery))
         self.plug = discover_plug_entity(hass, self.battery)
+        # Optional read-only wallbox power can expose a charging session
+        # before Geely's cloud data catches up. No Tesla services are called.
+        self.wallbox_power = "sensor.tesla_wall_connector_total_power"
         # Manual charging is a normal user action, not a staged armed test.
         # 'armed' only remains for compatibility with existing pure policy.
         self.armed = False
@@ -103,10 +106,18 @@ class LiveChargeController:
         return {key: self._raw(key) for key in MONITORED_GUARDS}
 
     def vehicle_activity(self):
-        """Read-only physical Geely indication, never charging ownership."""
-        return vehicle_activity(
+        """Best read-only power indication; Tesla is optional, never a command."""
+        activity, power = vehicle_activity(
             self._raw(self.charging_switch), self._raw(self.charging_power)
         )
+        if activity != "CHARGING":
+            try:
+                wall_power = float(self._raw(self.wallbox_power))
+            except (ValueError, TypeError):
+                wall_power = 0.0
+            if isfinite(wall_power) and wall_power > 0.25:
+                return "CHARGING", wall_power
+        return activity, power
 
     def _vehicle_indicates_charging(self):
         return self.vehicle_activity()[0] in ("CHARGING", "CHARGING_REPORTED")
@@ -259,6 +270,8 @@ class LiveChargeController:
             entities.append(self.charging_power)
         if self.plug:
             entities.append(self.plug)
+        if self.hass.states.get(self.wallbox_power) is not None:
+            entities.append(self.wallbox_power)
 
         @callback
         def changed(_event):
