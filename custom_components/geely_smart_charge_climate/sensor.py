@@ -11,14 +11,18 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.util import dt as dt_util
+from homeassistant.helpers.storage import Store
 
-from .const import CONF_BATTERY_ENTITY, CONF_CHARGING_POWER, CONF_CHARGING_SWITCH
+from .const import (
+    CONF_BATTERY_ENTITY, CONF_CHARGING_POWER, CONF_CHARGING_SWITCH,
+    CONF_CHARGER_RATED_KW, DEFAULT_CHARGER_RATED_KW,
+    DEFAULT_USABLE_CAPACITY_KWH, DOMAIN,
+)
+from .rate_learning import RateLearner, effective_fallback_kw
 from .simulator import next_deadline, simulate
 
 # What-if demonstration inputs; NOT the user's active seven-day schedule.
 DEMO_TARGET = 80.0
-DEMO_RATE_KW = 6.5
-DEMO_CAPACITY_KWH = 68.39
 DEMO_READY_TIME = "06:30"
 
 
@@ -112,6 +116,9 @@ class GeelySimulationSensor(GeelyObservedBase):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(hass, entry)
         self._attr_unique_id = f"{entry.entry_id}_simulation_decision"
+        self._rated_kw = float(entry.data.get(CONF_CHARGER_RATED_KW, DEFAULT_CHARGER_RATED_KW))
+        self._learner = RateLearner()
+        self._store = Store(hass, 1, f"{DOMAIN}_{entry.entry_id}_rate_learning")
 
     def _result(self):
         now = dt_util.now()
@@ -125,10 +132,14 @@ class GeelySimulationSensor(GeelyObservedBase):
                 soc = float(battery.state)
             except (TypeError, ValueError):
                 soc = None
+        rate = self._learner.learned_rate
+        if rate is None:
+            rate = effective_fallback_kw(self._rated_kw) * 100 / DEFAULT_USABLE_CAPACITY_KWH
+        effective_kw = rate * DEFAULT_USABLE_CAPACITY_KWH / 100
         return simulate(
             now=now, ready_by=ready, soc=soc,
-            target=DEMO_TARGET, effective_kw=DEMO_RATE_KW,
-            usable_kwh=DEMO_CAPACITY_KWH,
+            target=DEMO_TARGET, effective_kw=effective_kw,
+            usable_kwh=DEFAULT_USABLE_CAPACITY_KWH,
             charging=bool(charging and charging.state == "on"),
             # Plug and session-state confirmation are intentionally absent.
             # No START can be authorised by this read-only preview.
@@ -150,8 +161,12 @@ class GeelySimulationSensor(GeelyObservedBase):
             "schedule_source": "illustrative example, not active schedule",
             "example_target_percent": DEMO_TARGET,
             "example_ready_time": DEMO_READY_TIME,
-            "assumed_effective_kw": DEMO_RATE_KW,
-            "assumed_usable_capacity_kwh": DEMO_CAPACITY_KWH,
+            "charger_rated_kw": self._rated_kw,
+            "charge_rate_source": "learned" if self._learner.learned_rate is not None else "initial_estimate",
+            "learned_percentage_points_per_hour": self._learner.learned_rate,
+            "learning_sample_count": len(self._learner.samples),
+            "assumed_effective_kw": (self._learner.learned_rate * DEFAULT_USABLE_CAPACITY_KWH / 100) if self._learner.learned_rate is not None else effective_fallback_kw(self._rated_kw),
+            "assumed_usable_capacity_kwh": DEFAULT_USABLE_CAPACITY_KWH,
             "estimated_minutes": result.remaining_minutes,
             "estimated_start": result.start_at.isoformat() if result.start_at else None,
             "ready_by": result.ready_by.isoformat(),
@@ -163,6 +178,37 @@ class GeelySimulationSensor(GeelyObservedBase):
     async def async_added_to_hass(self) -> None:
         """Recompute at least once each minute as the deadline approaches."""
         await super().async_added_to_hass()
+        self._learner = RateLearner.from_storage(await self._store.async_load())
+
+        def record_change(event) -> None:
+            """Record live source changes, not periodic ticks."""
+            charging_state = self.hass.states.get(self._switch)
+            charge_active = bool(charging_state and charging_state.state == "on")
+            if self._power:
+                power_state = self.hass.states.get(self._power)
+                try:
+                    charge_active = charge_active and power_state is not None and float(power_state.state) > 0
+                except (ValueError, TypeError):
+                    charge_active = False
+            battery_state = self.hass.states.get(self._battery)
+            try:
+                soc = float(battery_state.state) if battery_state is not None else None
+            except (ValueError, TypeError):
+                soc = None
+            new_sample = self._learner.observe(
+                soc=soc, charging=charge_active, at=dt_util.now()
+            )
+            if new_sample:
+                self._store.async_delay_save(self._learner.to_storage, 5)
+            self.async_write_ha_state()
+
+        self.async_on_remove(
+            async_track_state_change_event(
+                self.hass, [self._battery, self._switch]
+                + ([self._power] if self._power else []),
+                record_change,
+            )
+        )
 
         def minute_tick(now) -> None:
             self.async_write_ha_state()
