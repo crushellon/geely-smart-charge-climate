@@ -16,6 +16,7 @@ from homeassistant.helpers import entity_registry as er
 from .const import (
     CONF_BATTERY_ENTITY,
     CONF_CHARGING_POWER,
+    CONF_CHARGING_SWITCH,
     DOMAIN,
 )
 from .discovery import discover_plug_entity
@@ -191,6 +192,7 @@ async def async_ensure_dashboard(hass, entry) -> None:
         battery=entry.data[CONF_BATTERY_ENTITY],
         plug=discover_plug_entity(hass, entry.data[CONF_BATTERY_ENTITY]),
         charging_power=entry.data.get(CONF_CHARGING_POWER),
+        charging_switch=entry.data.get(CONF_CHARGING_SWITCH),
         extra_sensors=_optional_vehicle_sensors(hass, entry),
         charger_sensors=_optional_wall_connector_sensors(hass),
     )
@@ -296,6 +298,7 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
         battery=entry.data[CONF_BATTERY_ENTITY],
         plug=discover_plug_entity(hass, entry.data[CONF_BATTERY_ENTITY]),
         charging_power=entry.data.get(CONF_CHARGING_POWER),
+        charging_switch=entry.data.get(CONF_CHARGING_SWITCH),
         extra_sensors=_optional_vehicle_sensors(hass, entry),
     )
     await stored_dashboard.async_save(new_config)
@@ -359,6 +362,7 @@ async def _refresh_generated_dashboard(hass, entry, stored_dashboard) -> None:
         battery=entry.data[CONF_BATTERY_ENTITY],
         plug=discover_plug_entity(hass, entry.data[CONF_BATTERY_ENTITY]),
         charging_power=entry.data.get(CONF_CHARGING_POWER),
+        charging_switch=entry.data.get(CONF_CHARGING_SWITCH),
         extra_sensors=_optional_vehicle_sensors(hass, entry),
     )
     try:
