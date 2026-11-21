@@ -27,6 +27,17 @@ class DummyAutomatic:
     def __init__(self, manual):
         self.owned = False
         self.stop_requested_at = None
+        self.mode = "Off"
+        self._lock = asyncio.Lock()
+
+    async def async_set_mode(self, mode):
+        self.mode = mode
+
+    async def _request_stop(self, message):
+        return None
+
+    def _update(self, status, message):
+        return None
 
     async def async_tick(self):
         return None
@@ -35,8 +46,21 @@ class DummyAutomatic:
         return None
 
 
+class DummyClimate:
+    def __init__(self, hass, entry, notify):
+        self.status = "IDLE"
+        self.message = "No commands sent"
+
+    async def apply(self, action):
+        self.status = action
+
+
 env = {
     "AutomaticChargeController": DummyAutomatic,
+    "ManualClimateController": DummyClimate,
+    "MANUAL_STOP_SETTLE": timedelta(0),
+    "MANUAL_STOP_WATCH": timedelta(minutes=5),
+    "datetime": datetime,
     "asyncio": asyncio,
     "isfinite": isfinite,
     "timedelta": timedelta,
@@ -87,14 +111,22 @@ class FakeStates:
         }
 
     def get(self, entity_id):
-        return self.data.get(entity_id)
+        old = self.data.get(entity_id)
+        if old is None:
+            return None
+        return SimpleNamespace(
+            state=old.state,
+            last_reported=datetime.now(timezone.utc) + timedelta(seconds=1),
+        )
 
 
 class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         states = FakeStates()
         services = FakeServices(states)
-        hass = SimpleNamespace(states=states, services=services)
+        hass = SimpleNamespace(states=states, services=services,
+                               config_entries=SimpleNamespace(async_update_entry=
+                                   lambda entry, options: setattr(entry, "options", options)))
         entry = SimpleNamespace(data={
             "battery_entity": "sensor.battery",
             "charging_switch": "switch.car",
@@ -153,6 +185,39 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.controller.async_arm(False)
         self.assertEqual(self.services.calls[-1][1], "turn_off")
         self.assertFalse(self.controller.armed)
+
+    async def test_product_manual_start_does_not_require_arm_toggle(self):
+        self.assertFalse(self.controller.armed)
+        await self.controller.async_set_target(73)
+        await self.controller.async_start_manual()
+        self.assertTrue(self.controller.owned)
+        self.assertEqual(self.services.calls[-1][1], "turn_on")
+        self.assertEqual(self.controller.active_target, 73)
+        await self.controller.async_stop()
+        self.assertEqual(self.services.calls[-1][1], "turn_off")
+        await self.controller.async_tick()
+        await self.controller.async_tick()
+        self.assertEqual(self.controller.status, "STOPPED")
+
+    async def test_manual_start_pauses_auto_until_resume(self):
+        self.controller.auto.mode = "Active"
+        await self.controller.async_start_manual(80)
+        self.assertEqual(self.controller.auto.mode, "Off")
+        await self.controller.async_stop()
+        await self.controller.async_tick()
+        await self.controller.async_tick()
+        await self.controller.async_resume_schedule()
+        self.assertEqual(self.controller.auto.mode, "Active")
+
+    async def test_native_emergency_stops_charge_and_latches(self):
+        await self.controller.async_start_manual(80)
+        self.assertTrue(self.controller.owned)
+        await self.controller.async_emergency_stop()
+        self.assertTrue(self.controller.entry.options["emergency_stop"])
+        self.assertEqual(self.services.calls[-1][1], "turn_off")
+        await self.controller.async_release_emergency_stop()
+        self.assertFalse(self.controller.entry.options["emergency_stop"])
+        self.assertEqual(self.controller.auto.mode, "Off")
 
     async def test_native_public_mode_blocks_manual_start(self):
         self.controller.entry.options["public_charging_mode"] = True
