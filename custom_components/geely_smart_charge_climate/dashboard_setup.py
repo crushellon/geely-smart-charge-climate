@@ -89,6 +89,43 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
     return result
 
 
+def _optional_vehicle_sensors(hass, entry) -> dict[str, str]:
+    """Discover available EX5 telemetry owned by the selected Geely entry.
+
+    Only exact vehicle-matching registry entities are shown. Speed is excluded.
+    """
+    registry = er.async_get(hass)
+    battery_id = entry.data[CONF_BATTERY_ENTITY]
+    battery = registry.async_get(battery_id)
+    if battery is None or not battery_id.endswith("_battery"):
+        return {}
+    stem = battery_id[len("sensor."):-len("_battery")]
+    keys = (
+        "electric_range", "range_at_full_charge", "total_mileage",
+        "trip_meter", "trip_consumption", "average_consumption", "efficiency",
+        "interior_temperature", "exterior_temperature", "cabin_humidity",
+        "tire_front_left", "tire_front_right", "tire_rear_left",
+        "tire_rear_right", "tire_temperature_fl", "tire_temperature_fr",
+        "tire_temperature_rl", "tire_temperature_rr",
+        "12v_battery", "12v_voltage", "days_to_service",
+        "distance_to_service", "last_updated", "car_reported_at",
+        "charge_current", "charge_voltage", "time_to_full_charge",
+    )
+    result = {}
+    for key in keys:
+        entity_id = f"sensor.{stem}_{key}"
+        entity = registry.async_get(entity_id)
+        if (
+            entity is not None
+            and entity.disabled_by is None
+            and entity.config_entry_id == battery.config_entry_id
+            and (not battery.device_id or not entity.device_id
+                 or battery.device_id == entity.device_id)
+        ):
+            result[key] = entity_id
+    return result
+
+
 async def async_ensure_dashboard(hass, entry) -> None:
     """Create one non-destructive dashboard in the sidebar.
 
@@ -124,6 +161,7 @@ async def async_ensure_dashboard(hass, entry) -> None:
         battery=entry.data[CONF_BATTERY_ENTITY],
         plug=discover_plug_entity(hass, entry.data[CONF_BATTERY_ENTITY]),
         charging_power=entry.data.get(CONF_CHARGING_POWER),
+        extra_sensors=_optional_vehicle_sensors(hass, entry),
     )
     # Dashboard metadata registration persists across Home Assistant restarts.
     item = await collection.async_create_item(
@@ -184,14 +222,33 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
     ):
         _LOGGER.info("Test dashboard appears customized; migration skipped")
         return
-    # Recognize only the known v0.1.7 generated Climate tab layout.
-    if (
-        len(climate) != 14
-        or climate[0].get("type") != "markdown"
-        or "Cabin comfort settings" not in climate[0].get("content", "")
-        or climate[7].get("title") != "Climate schedule 1"
-        or climate[13].get("title") != "Climate schedule 7"
-    ):
+    # Recognize v0.1.4–0.1.7 generated layouts; never overwrite edits.
+    old_placeholder = (
+        len(climate) == 1
+        and climate[0].get("type") == "markdown"
+        and "Climate controls and heated-seat profiles" in climate[0].get("content", "")
+    )
+    old_sliders = (
+        len(climate) == 3
+        and climate[0].get("type") == "markdown"
+        and "Cabin comfort profiles" in climate[0].get("content", "")
+        and [c.get("title") for c in climate[1:]] == ["Warm profile", "Cool profile"]
+    )
+    old_comfort = (
+        len(climate) == 5
+        and climate[0].get("type") == "markdown"
+        and "Cabin comfort settings" in climate[0].get("content", "")
+        and [c.get("type") for c in climate[1:]]
+        == ["entities", "conditional", "entities", "conditional"]
+    )
+    old_with_slots = (
+        len(climate) == 14
+        and climate[0].get("type") == "markdown"
+        and "Cabin comfort settings" in climate[0].get("content", "")
+        and climate[7].get("title") == "Climate schedule 1"
+        and climate[13].get("title") == "Climate schedule 7"
+    )
+    if not (old_placeholder or old_sliders or old_comfort or old_with_slots):
         _LOGGER.info("Climate layout customized; preserving it")
         return
 
