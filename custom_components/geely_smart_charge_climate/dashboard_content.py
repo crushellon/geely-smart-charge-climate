@@ -119,6 +119,7 @@ def dashboard_config(
     battery: str,
     plug: str | None = None,
     charging_power: str | None = None,
+    extra_sensors: dict[str, str] | None = None,
 ) -> dict:
     """Construct a native, mobile-friendly four-view Lovelace dashboard.
 
@@ -225,6 +226,57 @@ def dashboard_config(
         "**Charging-linked comfort** uses the same ready-by time as charging. "
         "Choose Cool/Warm on the charging schedule; its settings are on "
         "Comfort Settings. **Simulation only.**"}
+    extra_sensors = extra_sensors or {}
+    extras = []
+    groups = (
+        ("Range & efficiency", (
+            ("electric_range", "Estimated range"),
+            ("range_at_full_charge", "Range at 100%"),
+            ("total_mileage", "Odometer"),
+            ("trip_meter", "Trip meter"),
+            ("trip_consumption", "Trip consumption"),
+            ("average_consumption", "Average consumption"),
+            ("efficiency", "Energy efficiency"),
+        )),
+        ("Climate & temperatures", (
+            ("interior_temperature", "Cabin temperature"),
+            ("exterior_temperature", "Outside temperature"),
+            ("cabin_humidity", "Cabin humidity"),
+        )),
+        ("Tyre monitoring", (
+            ("tire_front_left", "Front left pressure"),
+            ("tire_front_right", "Front right pressure"),
+            ("tire_rear_left", "Rear left pressure"),
+            ("tire_rear_right", "Rear right pressure"),
+            ("tire_temperature_fl", "Front left temperature"),
+            ("tire_temperature_fr", "Front right temperature"),
+            ("tire_temperature_rl", "Rear left temperature"),
+            ("tire_temperature_rr", "Rear right temperature"),
+        )),
+        ("Vehicle health", (
+            ("12v_battery", "12V battery"),
+            ("12v_voltage", "12V voltage"),
+            ("days_to_service", "Days to service"),
+            ("distance_to_service", "Distance to service"),
+            ("last_updated", "Last update"),
+            ("car_reported_at", "Last vehicle report"),
+        )),
+        ("Charging measurements", (
+            ("charge_current", "Charging current"),
+            ("charge_voltage", "Charging voltage"),
+            ("time_to_full_charge", "Time to full"),
+        )),
+    )
+    for title, fields in groups:
+        rows = [
+            {"entity": extra_sensors[key], "name": name}
+            for key, name in fields if key in extra_sensors
+        ]
+        if rows:
+            extras.append({
+                "type": "entities", "title": title,
+                "show_header_toggle": False, "entities": rows,
+            })
     data_cards = [
         {"type": "markdown", "content":
          "## Geely EX5 — vehicle data\n"
@@ -283,7 +335,7 @@ def dashboard_config(
                 "max_columns": 2,
                 "sections": [
                     _section(data_cards[:4]),
-                    _section(data_cards[4:]),
+                    _section(data_cards[4:] + extras),
                 ],
             },
         ],
