@@ -28,7 +28,7 @@ An early **experimental integration** for Home Assistant, designed for the **Gee
   deadline for the day's Cool/Warm profile and ends after the selected hold
   interval. It does not require active charging to be underway at that moment.
   Public mode suppresses linked climate; no Tesla hardware is needed.
-- **Seven independent climate sessions** now issue Geely temperature, seat
+- **Seven independent climate sessions** issue Geely temperature, seat
   heating/ventilation and steering-wheel commands at their configured lead
   time, regardless of charging or plug state; the vehicle is switched back
   off at each scheduled end. Independent slots can share days, and active
