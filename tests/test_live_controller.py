@@ -390,8 +390,13 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.auto.mode, "Off")
         self.assertTrue(self.controller.entry.options["emergency_stop"])
         await self.controller.async_release_emergency_stop()
-        self.assertEqual(self.controller.auto.mode, "Active")
+        # An explicit STOP is still being verified. Releasing the latch
+        # preserves the preference but must not authorise a new START yet.
+        self.assertEqual(self.controller.auto.mode, "Off")
         self.assertTrue(self.controller.entry.options["automatic_charging_enabled"])
+        self.controller.auto.stop_requested_at = None
+        await self.controller.async_reconcile_automatic()
+        self.assertEqual(self.controller.auto.mode, "Active")
 
     async def test_restart_adopts_manual_charge_without_duplicate_start(self):
         self.controller.entry.options["manual_session"] = {
