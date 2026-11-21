@@ -147,6 +147,8 @@ def dashboard_config(
             "title": "Automatic controller & audit",
             "show_header_toggle": False,
             "entities": [
+                {"entity": entity_ids["public_charging_mode"],
+                 "name": "Public charging mode — turn ON when away/public"},
                 {"entity": entity_ids["automatic_charge_mode"],
                  "name": "Controller mode"},
                 {"entity": entity_ids["automatic_charge_decision"],
@@ -158,7 +160,7 @@ def dashboard_config(
             "content": "#### Latest decision\n"
             f"Status: **{{{{ states('{entity_ids['automatic_charge_decision']}') }}}}**  \n"
             f"Reason: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'message') or '—' }}}}  \n"
-            f"Home confirmed: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'home_confirmed') }}}}  \n"
+            f"Public charging: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'public_charging_mode') }}}}  \n"
             f"Next ready by: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'ready_by') or '—' }}}}  \n"
             f"Enabled days: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'enabled_schedule_days') or [] }}}}  \n"
             f"Live policy: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'live_policy_reason') or '—' }}}}",
@@ -247,6 +249,8 @@ def dashboard_config(
             "content": "## Geely Smart Charge & Climate\n"
             "**Climate remains simulation-only.** Charging commands require explicit "
             "manual arming or Active automatic mode; Monitor is read-only. "
+            "**Turn Public charging mode ON before connecting to a public charger; "
+            "turn it OFF at home. No location is detected automatically.** "
             "Keep your old controller disabled during testing.",
         },
         {"type": "gauge", "entity": battery, "name": "Battery", "min": 0, "max": 100},
