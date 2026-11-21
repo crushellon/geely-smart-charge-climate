@@ -15,7 +15,8 @@ from homeassistant.components import persistent_notification
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers import entity_registry as er
 
-from .authorization import decide
+from .authorization import ChargeDecision, decide
+from .weekly_schedule import validate_day
 from .live_safety import (
     LEGACY_CONTROLLER, LEGACY_ACTIVE, OLD_FULL_CHARGE,
     PUBLIC_MODE, EMERGENCY_STOP, start_preflight,
@@ -123,7 +124,8 @@ class AutomaticChargeController:
             _LOGGER.exception("Could not publish charging controller notification")
 
     def _update(self, status, message, decision=None):
-        changed = (self.status != status or self.message != message)
+        changed = (self.status != status or self.message != message or
+                   (decision is not None and decision != self.decision))
         self.status = status
         self.message = message
         if decision is not None:
@@ -191,7 +193,9 @@ class AutomaticChargeController:
         """Start only when Geely telemetry and user-operated guards permit."""
         if self.mode != "Active" or self.manual.armed or self.manual.owned:
             return
-        deadline_key = (plan.day, plan.ready_by.isoformat())
+        # One session per departure calendar day, even if the user edits
+        # the target or ready-by clock time after starting.
+        deadline_key = (plan.day, plan.ready_by.date().isoformat())
         if deadline_key in self.completed_deadlines:
             self._update("COMPLETED", "This scheduled charging session already ended")
             return
@@ -260,7 +264,7 @@ class AutomaticChargeController:
 
     def _release(self, state, message):
         if self.owned and self.owned_day and self.owned_deadline:
-            self.completed_deadlines.add((self.owned_day, self.owned_deadline.isoformat()))
+            self.completed_deadlines.add((self.owned_day, self.owned_deadline.date().isoformat()))
         self.owned = False
         self.owned_target = None
         self.owned_day = None
@@ -272,6 +276,56 @@ class AutomaticChargeController:
         self.stop_attempts = 0
         self.unexpected_since = None
         self._update(state, message)
+
+    async def _reconcile_owned_schedule(self):
+        """Apply current schedule edits to an already-running charge.
+
+        Do not recalculate the ownership day from the current clock. The
+        existing session belongs to its original departure date; this makes
+        cross-midnight sessions stable when their target or ready-by time changes.
+        A pending STOP is never reversed by editing the schedule.
+        """
+        try:
+            schedule = self.entry.options.get("weekly_schedule", {})
+            settings = validate_day(schedule.get(self.owned_day, {}))
+        except (ValueError, TypeError, AttributeError):
+            await self._request_stop("Scheduled charge settings invalid")
+            return False
+
+        if not settings["enabled"]:
+            await self._request_stop("Scheduled charge disabled while running")
+            return False
+
+        hours, minutes = map(int, settings["ready_time"].split(":"))
+        deadline = self.owned_deadline.replace(
+            hour=hours, minute=minutes, second=0, microsecond=0
+        )
+        changed = (settings["target"] != self.owned_target or
+                   deadline != self.owned_deadline)
+        self.owned_target = settings["target"]
+        self.owned_deadline = deadline
+
+        active_decision = ChargeDecision(
+            action="AUTHORISED",
+            reason=("100% charge: Geely controls completion" if self.owned_target == 100
+                    else "Running scheduled charge to current target"),
+            day=self.owned_day, target=self.owned_target,
+            start_at=(self.decision.start_at if self.decision is not None
+                      and self.decision.day == self.owned_day else None),
+            ready_by=self.owned_deadline,
+        )
+        self._update(
+            "CHARGING",
+            f"Scheduled charge active: target {self.owned_target}%",
+            active_decision,
+        )
+        if changed:
+            self._notice(
+                "schedule_changed",
+                f"Active {self.owned_day} charge updated to {self.owned_target}% "
+                f"by {self.owned_deadline.strftime('%H:%M')}",
+            )
+        return True
 
     async def async_tick(self):
         """Decide, log, and (only when Active) act on non-public charging."""
@@ -315,6 +369,8 @@ class AutomaticChargeController:
                 if self.mode != "Active":
                     await self._request_stop("Automatic mode no longer active")
                     return
+                if not await self._reconcile_owned_schedule():
+                    return
                 soc = self._soc()
                 if self.owned_target < 100 and (soc is None or soc >= self.owned_target):
                     await self._request_stop(
@@ -357,7 +413,11 @@ class AutomaticChargeController:
 
             # Never command while a manual test is armed or owns the vehicle.
             policy = self._policy()
-            self.decision = policy
+            # The visible decision must refresh even if the status text stays
+            # unchanged (for example, a target edit during WAIT/CHARGING).
+            if policy != self.decision:
+                self.decision = policy
+                self.manual._notify()
             if self.mode == "Monitor":
                 self._update("MONITORING", f"{policy.action}: {policy.reason}", policy)
                 return
