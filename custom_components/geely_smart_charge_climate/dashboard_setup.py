@@ -19,7 +19,8 @@ from .const import (
     DOMAIN,
 )
 from .discovery import discover_plug_entity
-from .dashboard_content import DAYS, dashboard_config
+from .dashboard_content import DAYS, dashboard_config, comfort_cards
+from .comfort import PROFILES, FIELDS
 
 _LOGGER = logging.getLogger(__name__)
 DASHBOARD_PATH = "geely-ev-control-centre"
@@ -38,6 +39,11 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
             f"{day}_target": ("number", f"{entry.entry_id}_{day}_target"),
             f"{day}_ready_time": ("time", f"{entry.entry_id}_{day}_ready_time"),
         })
+    for profile in PROFILES:
+        for field in FIELDS:
+            unique_ids[f"{profile}_{field}"] = (
+                "number", f"{entry.entry_id}_{profile}_{field}"
+            )
     result = {}
     for key, (platform, unique_id) in unique_ids.items():
         entity_id = registry.async_get_entity_id(platform, DOMAIN, unique_id)
@@ -58,9 +64,10 @@ async def async_ensure_dashboard(hass, entry) -> None:
         _LOGGER.warning("Lovelace is unavailable; EV dashboard not created")
         return
     data = hass.data[LOVELACE_DATA]
-    if DASHBOARD_PATH in data.dashboards or frontend.async_panel_exists(
-        hass, DASHBOARD_PATH
-    ):
+    if DASHBOARD_PATH in data.dashboards:
+        await _maybe_upgrade_existing_dashboard(hass, entry, data.dashboards[DASHBOARD_PATH])
+        return
+    if frontend.async_panel_exists(hass, DASHBOARD_PATH):
         return
 
     # Avoid collisions with any dashboard already stored under this path.
@@ -87,7 +94,7 @@ async def async_ensure_dashboard(hass, entry) -> None:
     item = await collection.async_create_item(
         {
             "url_path": DASHBOARD_PATH,
-            "title": "EV Control Centre",
+            "title": "Geely EV Control Centre (Test)",
             "icon": "mdi:ev-station",
             "show_in_sidebar": True,
             "require_admin": False,
@@ -101,9 +108,49 @@ async def async_ensure_dashboard(hass, entry) -> None:
         frontend_url_path=DASHBOARD_PATH,
         require_admin=False,
         show_in_sidebar=True,
-        sidebar_title="EV Control Centre",
+        sidebar_title="Geely EV Control Centre (Test)",
         sidebar_icon="mdi:ev-station",
         config={"mode": "storage"},
     )
     await storage_dashboard.async_save(display)
     _LOGGER.info("Created native EV Control Centre dashboard at /%s", DASHBOARD_PATH)
+
+
+async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> None:
+    """Upgrade only the untouched v0.1.4 placeholder; preserve user edits.
+
+    Never replace other views, or change the Climate view if the user has
+    edited it. The user's original EV dashboard is at a different path.
+    """
+    ids = _dashboard_entity_ids(hass, entry)
+    if ids is None:
+        return
+    try:
+        config = await stored_dashboard.async_load(False)
+    except Exception:
+        _LOGGER.exception("Could not read the existing EV test dashboard")
+        return
+    if not isinstance(config, dict):
+        return
+    views = config.get("views", [])
+    climate = next((view for view in views if view.get("path") == "climate"), None)
+    if not climate:
+        return
+    current_cards = climate.get("cards", [])
+    if len(current_cards) != 1 or current_cards[0].get("type") != "markdown":
+        return
+    old_text = current_cards[0].get("content", "")
+    if (
+        "Climate controls and heated-seat profiles will be" not in old_text
+        or "This development release cannot command" not in old_text
+    ):
+        # Not the untouched generated placeholder: leave the dashboard alone.
+        return
+    from copy import deepcopy
+
+    updated = deepcopy(config)
+    view = next(view for view in updated["views"] if view.get("path") == "climate")
+    view["cards"] = comfort_cards(ids)
+    updated["title"] = "Geely EV Control Centre (Test)"
+    await stored_dashboard.async_save(updated)
+    _LOGGER.info("Updated untouched test Climate tab with editable comfort profiles")
