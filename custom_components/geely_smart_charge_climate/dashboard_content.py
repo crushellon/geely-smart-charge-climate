@@ -132,6 +132,38 @@ def dashboard_config(
     status = entity_ids["observer_status"]
     simulation = entity_ids["simulation_decision"]
 
+    automatic_panel = [
+        {
+            "type": "markdown",
+            "content": "### Automatic charging authorisation\n"
+            "**Off:** no automatic commands. "
+            "**Monitor:** records decisions without touching the car. "
+            "**Active:** permits scheduled charging and verified stopping of "
+            "unauthorised *home* charging only after safety checks. "
+            "This testing-stage mode resets to Off after a Home Assistant restart. "
+            "Do not leave it unattended yet.",
+        },
+        {
+            "type": "entities",
+            "title": "Automatic controller & audit",
+            "show_header_toggle": False,
+            "entities": [
+                {"entity": entity_ids["automatic_charge_mode"],
+                 "name": "Controller mode"},
+                {"entity": entity_ids["automatic_charge_decision"],
+                 "name": "Latest authorisation decision"},
+            ],
+        },
+        {
+            "type": "markdown",
+            "content": "#### Latest decision\n"
+            f"Status: **{{{{ states('{entity_ids['automatic_charge_decision']}') }}}}**  \n"
+            f"Reason: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'message') or '—' }}}}  \n"
+            f"Home confirmed: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'home_confirmed') }}}}  \n"
+            f"Next ready by: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'ready_by') or '—' }}}}",
+        },
+    ]
+
     live_panel = [
         {
             "type": "markdown",
@@ -212,9 +244,9 @@ def dashboard_config(
         {
             "type": "markdown",
             "content": "## Geely Smart Charge & Climate\n"
-            "**Schedules and climate remain simulation-only.** "
-            "Only the explicitly armed live manual test sends charging commands. "
-            "Keep all other charging controllers disabled during testing.",
+            "**Climate remains simulation-only.** Charging commands require explicit "
+            "manual arming or Active automatic mode; Monitor is read-only. "
+            "Keep your old controller disabled during testing.",
         },
         {"type": "gauge", "entity": battery, "name": "Battery", "min": 0, "max": 100},
         live_status_card,
@@ -492,7 +524,7 @@ def dashboard_config(
                 "type": "sections",
                 "max_columns": 2,
                 "sections": [
-                    _section(charging_cards + live_panel),
+                    _section(charging_cards + automatic_panel + live_panel),
                     _section([charging_schedule_card(entity_ids), info]),
                 ],
             },
