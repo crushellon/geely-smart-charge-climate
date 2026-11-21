@@ -1,7 +1,7 @@
-"""Opt-in, manual-only live EX5 charging test controller.
+"""Shared Geely-only charge/climate runtime and persistent owner coordination.
 
-No scheduled starts, no climate commands, and no commands until a user
-explicitly arms AND presses Start test. Never controls Tesla wallboxes.
+Automatic charging uses saved user intent, manual commands temporarily
+take priority, and scheduled cabin commands never control Tesla hardware.
 """
 import asyncio
 from datetime import datetime, timedelta
