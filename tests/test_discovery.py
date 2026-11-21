@@ -59,7 +59,7 @@ class DiscoveryStaticTests(unittest.TestCase):
                        and n.func.value.attr == "auto"
                        for n in ast.walk(node))
         self.assertTrue(auto_tick_present(periodic))
-        self.assertTrue(auto_tick_present(options_changed))
+        self.assertIn("async_reconcile_automatic", ast.unparse(options_changed))
         self.assertIn("self._notify()", ast.unparse(options_changed))
         source = ast.unparse(listening)
         self.assertIn("add_update_listener(options_changed)", source)
