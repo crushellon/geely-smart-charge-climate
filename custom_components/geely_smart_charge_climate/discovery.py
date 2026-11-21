@@ -126,3 +126,29 @@ def discover_plug_entity(hass: HomeAssistant, battery_entity: str) -> str | None
     if battery.device_id and plug.device_id and battery.device_id != plug.device_id:
         return None
     return plug.entity_id
+
+
+def discover_charging_power_entity(hass: HomeAssistant, battery_entity: str) -> str | None:
+    """Find a charging-power sensor on the exact same Geely vehicle.
+
+    An unset optional power source should not hide a sensor already exposed
+    by Geely Connect. Never select another vehicle or a similarly named entity.
+    """
+    registry = er.async_get(hass)
+    battery = registry.async_get(battery_entity)
+    if battery is None or battery.disabled_by is not None:
+        return None
+    owner = _geely_entry_id(hass, battery)
+    if owner is None:
+        return None
+    if not battery_entity.startswith("sensor.") or not battery_entity.endswith("_battery"):
+        return None
+    stem = battery_entity[len("sensor."):-len("_battery")]
+    candidate = registry.async_get(f"sensor.{stem}_charging_power")
+    if candidate is None or candidate.disabled_by is not None:
+        return None
+    if _geely_entry_id(hass, candidate) != owner:
+        return None
+    if battery.device_id and candidate.device_id and battery.device_id != candidate.device_id:
+        return None
+    return candidate.entity_id
