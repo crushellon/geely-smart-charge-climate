@@ -27,6 +27,7 @@ class DashboardTests(unittest.TestCase):
             "manual_charge_target": "number.manual_charge_target",
             "manual_cabin_temperature": "number.manual_cabin_temperature",
             "manual_climate_status": "sensor.manual_climate_status",
+            "scheduled_climate_status": "sensor.scheduled_climate_status",
         }
         for day in module.DAYS:
             for role, domain in (
