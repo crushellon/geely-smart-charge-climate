@@ -509,23 +509,29 @@ class VehicleChargingStatusSensor(GeelyObservedBase):
 
     @property
     def native_value(self):
-        raw_switch = self.hass.states.get(self._switch)
-        raw_power = self.hass.states.get(self._power) if self._power else None
-        return vehicle_activity(
-            raw_switch.state if raw_switch else None,
-            raw_power.state if raw_power else None,
-        )[0]
+        return self.entry.runtime_data.vehicle_activity()[0]
 
     @property
     def extra_state_attributes(self):
         runtime = self.entry.runtime_data
         activity, power = runtime.vehicle_activity()
+        geely_activity, geely_power = vehicle_activity(
+            runtime._raw(runtime.charging_switch),
+            runtime._raw(runtime.charging_power),
+        )
+        wallbox_source = (
+            activity == "CHARGING" and geely_activity != "CHARGING"
+        )
         return {
             "geely_charging_switch": runtime._raw(runtime.charging_switch),
-            "geely_power_kw": power,
-            "source": ("Geely charging power" if activity == "CHARGING"
-                       else "Geely charging switch" if activity == "CHARGING_REPORTED"
-                       else "Geely telemetry"),
+            "geely_power_kw": geely_power,
+            "wallbox_power_kw": (
+                power if wallbox_source else None
+            ),
+            "source": ("Tesla Wall Connector (optional, read-only)"
+                       if wallbox_source else "Geely charging power"
+                       if activity == "CHARGING" else "Geely charging switch"
+                       if activity == "CHARGING_REPORTED" else "Geely telemetry"),
             "attribution": (
                 "manual" if runtime.owned else
                 "automatic" if runtime.auto.owned else
@@ -537,6 +543,15 @@ class VehicleChargingStatusSensor(GeelyObservedBase):
             ),
             "controller_will_not_stop_unattributed_charge": True,
         }
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        wallbox = self.entry.runtime_data.wallbox_power
+        if self.hass.states.get(wallbox) is not None:
+            self.async_on_remove(async_track_state_change_event(
+                self.hass, [wallbox],
+                lambda event: self.async_write_ha_state()
+            ))
 
 
 class ScheduledClimateStatusSensor(SensorEntity):
