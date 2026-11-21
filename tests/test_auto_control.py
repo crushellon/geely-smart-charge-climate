@@ -111,6 +111,21 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.auto.decision.action, "START")
         self.assertEqual(self.services.calls, [])
 
+    async def test_monitor_recalculates_after_weekly_schedule_edited(self):
+        self.entry.options["weekly_schedule"] = {}
+        await self.auto.async_set_mode("Monitor")
+        self.assertEqual(self.auto.decision.reason, "No charging schedule enabled")
+        self.entry.options["weekly_schedule"] = {
+            "monday": {"enabled": True, "target": 100, "ready_time": "08:00"},
+        }
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "MONITORING")
+        self.assertIn(self.auto.decision.action, ("WAIT", "START"))
+        self.assertEqual(self.auto.decision.day, "monday")
+        self.assertEqual(self.auto.decision.target, 100)
+        self.assertNotEqual(self.auto.decision.reason, "No charging schedule enabled")
+        self.assertEqual(self.services.calls, [])
+
     async def test_active_starts_and_stops_at_80(self):
         await self.auto.async_set_mode("Active")
         self.assertEqual(self.services.calls, ["turn_on"])
