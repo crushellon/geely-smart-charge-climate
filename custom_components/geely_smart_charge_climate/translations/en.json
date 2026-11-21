@@ -22,5 +22,88 @@
       "invalid_battery": "The battery sensor must report a percentage between 0 and 100.",
       "invalid_charger_rate": "Enter a charging rate between 1 and 22 kW."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Weekly charging schedule (simulation only)",
+        "description": "Choose a day to configure. Each day refers to when the vehicle must be ready; changing these settings does not send charging commands.",
+        "menu_options": {
+          "monday": "Monday",
+          "tuesday": "Tuesday",
+          "wednesday": "Wednesday",
+          "thursday": "Thursday",
+          "friday": "Friday",
+          "saturday": "Saturday",
+          "sunday": "Sunday"
+        }
+      },
+      "monday": {
+        "title": "Monday charging schedule",
+        "description": "Enable this day and set the desired battery target and ready-by time. This controls simulation only.",
+        "data": {
+          "enabled": "Enable this day",
+          "target": "Target battery (%)",
+          "ready_time": "Ready by (HH:MM)"
+        }
+      },
+      "tuesday": {
+        "title": "Tuesday charging schedule",
+        "description": "Enable this day and set the desired battery target and ready-by time. This controls simulation only.",
+        "data": {
+          "enabled": "Enable this day",
+          "target": "Target battery (%)",
+          "ready_time": "Ready by (HH:MM)"
+        }
+      },
+      "wednesday": {
+        "title": "Wednesday charging schedule",
+        "description": "Enable this day and set the desired battery target and ready-by time. This controls simulation only.",
+        "data": {
+          "enabled": "Enable this day",
+          "target": "Target battery (%)",
+          "ready_time": "Ready by (HH:MM)"
+        }
+      },
+      "thursday": {
+        "title": "Thursday charging schedule",
+        "description": "Enable this day and set the desired battery target and ready-by time. This controls simulation only.",
+        "data": {
+          "enabled": "Enable this day",
+          "target": "Target battery (%)",
+          "ready_time": "Ready by (HH:MM)"
+        }
+      },
+      "friday": {
+        "title": "Friday charging schedule",
+        "description": "Enable this day and set the desired battery target and ready-by time. This controls simulation only.",
+        "data": {
+          "enabled": "Enable this day",
+          "target": "Target battery (%)",
+          "ready_time": "Ready by (HH:MM)"
+        }
+      },
+      "saturday": {
+        "title": "Saturday charging schedule",
+        "description": "Enable this day and set the desired battery target and ready-by time. This controls simulation only.",
+        "data": {
+          "enabled": "Enable this day",
+          "target": "Target battery (%)",
+          "ready_time": "Ready by (HH:MM)"
+        }
+      },
+      "sunday": {
+        "title": "Sunday charging schedule",
+        "description": "Enable this day and set the desired battery target and ready-by time. This controls simulation only.",
+        "data": {
+          "enabled": "Enable this day",
+          "target": "Target battery (%)",
+          "ready_time": "Ready by (HH:MM)"
+        }
+      }
+    },
+    "error": {
+      "invalid_schedule": "Enter a valid 24-hour ready-by time (HH:MM) and target from 50% to 100%."
+    }
   }
 }
