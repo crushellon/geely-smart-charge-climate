@@ -31,7 +31,9 @@ env = {
                                utcnow=lambda: datetime.now(timezone.utc)),
     "persistent_notification": SimpleNamespace(
         async_create=lambda *a, **kw: logs.append((a, kw))),
-    "decide": policy.decide, "start_preflight": safety.start_preflight,
+    "decide": policy.decide, "ChargeDecision": policy.ChargeDecision,
+    "validate_day": sys.modules["auto_test_package.weekly_schedule"].validate_day,
+    "start_preflight": safety.start_preflight,
     "LEGACY_CONTROLLER": safety.LEGACY_CONTROLLER,
     "LEGACY_ACTIVE": safety.LEGACY_ACTIVE,
     "OLD_FULL_CHARGE": safety.OLD_FULL_CHARGE,
