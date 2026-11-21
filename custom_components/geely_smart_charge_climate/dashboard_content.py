@@ -119,6 +119,7 @@ def dashboard_config(
     battery: str,
     plug: str | None = None,
     charging_power: str | None = None,
+    charging_switch: str | None = None,
     extra_sensors: dict[str, str] | None = None,
     charger_sensors: dict[str, str] | None = None,
 ) -> dict:
@@ -184,15 +185,39 @@ def dashboard_config(
         },
     ]
 
+
+    # Use Markdown instead of a switch entity row to prevent accidental toggles.
+    status_line = (
+        f"**Geely charging:** {{{{ states('{charging_switch}') | title }}}}  \n"
+        if charging_switch else "**Geely charging:** Not configured  \n"
+    )
+    power_line = (
+        f"**Charging power:** {{{{ states('{charging_power}') }}}} "
+        f"{{{{ state_attr('{charging_power}', 'unit_of_measurement') or 'kW' }}}}  \n"
+        if charging_power else "**Charging power:** Not configured  \n"
+    )
+    plug_line = (
+        f"**Cable connected:** {{{{ states('{plug}') | title }}}}  \n"
+        if plug else "**Cable connected:** Not detected  \n"
+    )
+    live_status_card = {
+        "type": "markdown",
+        "content": "### Live Geely charging status\n"
+        + f"**Battery:** {{{{ states('{battery}') }}}}%  \n"
+        + status_line + power_line + plug_line
+        + "*Read-only telemetry; use the armed live-test controls below.*",
+    }
+
     charging_cards = [
         {
             "type": "markdown",
             "content": "## Geely Smart Charge & Climate\n"
-            "**Simulation only.** This integration does not start, stop, "
-            "heat or cool your vehicle. Your existing charging automations "
-            "remain independent.",
+            "**Schedules and climate remain simulation-only.** "
+            "Only the explicitly armed live manual test sends charging commands. "
+            "Keep all other charging controllers disabled during testing.",
         },
         {"type": "gauge", "entity": battery, "name": "Battery", "min": 0, "max": 100},
+        live_status_card,
         {
             "type": "entities",
             "title": "Vehicle and connection",
