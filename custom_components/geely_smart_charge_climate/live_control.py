@@ -130,9 +130,12 @@ class LiveChargeController:
             self.hass.async_create_task(self.auto.async_tick())
 
         async def options_changed(_hass, _entry):
-            # A dashboard schedule change updates config-entry options
-            # without changing any vehicle entity state.
+            # Every persisted schedule/comfort edit refreshes the live
+            # controller first, then notifies HA even when status is unchanged.
+            # This includes linked comfort/profile/timing edits, which do not
+            # command cabin climate in the experimental integration.
             await self.auto.async_tick()
+            self._notify()
 
         self._unsubs.append(
             self.entry.add_update_listener(options_changed)

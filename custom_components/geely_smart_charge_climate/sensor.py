@@ -23,6 +23,7 @@ from .discovery import discover_plug_entity
 from .simulator import simulate
 from .weekly_schedule import next_charge
 from .climate_schedule import next_event
+from .charge_climate import snapshot as linked_comfort_snapshot
 
 
 async def async_setup_entry(
@@ -349,6 +350,8 @@ class AutomaticChargeStatusSensor(SensorEntity):
     def extra_state_attributes(self):
         auto = self.entry.runtime_data.auto
         decision = auto.decision
+        day = auto.owned_day or (decision.day if decision else None)
+        comfort = linked_comfort_snapshot(self.entry.options, day) if day else None
         return {
             "mode": auto.mode,
             "message": auto.message,
@@ -371,6 +374,17 @@ class AutomaticChargeStatusSensor(SensorEntity):
             "battery_percent": auto._soc(),
             "owns_automatic_session": auto.owned,
             "active_target": auto.owned_target,
+            "active_ready_by": auto.owned_deadline.isoformat()
+                               if auto.owned_deadline else None,
+            "linked_comfort_enabled": comfort["enabled"] if comfort else None,
+            "linked_comfort_profile": comfort["profile"] if comfort else None,
+            "linked_comfort_temperature": comfort["temperature"] if comfort else None,
+            "linked_comfort_driver_seat": comfort["driver_seat"] if comfort else None,
+            "linked_comfort_passenger_seat": comfort["passenger_seat"] if comfort else None,
+            "linked_comfort_steering_heat": comfort["steering_heat"] if comfort else None,
+            "linked_comfort_lead_minutes": comfort["lead_minutes"] if comfort else None,
+            "linked_comfort_hold_minutes": comfort["hold_minutes"] if comfort else None,
+            "linked_comfort_commands_enabled": False,
             "stop_attempts": auto.stop_attempts,
             "stop_confirmation_pending": auto.stop_requested_at is not None,
             "last_event": auto.last_event,
