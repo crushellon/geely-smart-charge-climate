@@ -6,6 +6,28 @@ An early **experimental integration** for Home Assistant, designed for the **Gee
 
 **Public charging responsibility:** Turn **Public charging mode ON before connecting to any public charger**, and turn it OFF when returning to normal automatic charging. The integration does not detect home location or public charging automatically. When ON, automatic charging starts, unexpected-charge stops and manual charging commands from this integration are suppressed. The native switch persists across Home Assistant restarts. Existing `input_boolean.ev_public_charging_mode` installations are still honoured as an additional interlock, so both must be OFF to resume normal charging. The optional Tesla Wall Connector is never required for core control.
 
+## Manual charging owner handoff fix (v0.3.10)
+
+A real EX5 test revealed an overlap between the automatic charging controller's
+five-minute **post-stop rebound watchdog** and a new explicitly authorised
+**manual charging session**. The watchdog could mistake the manual START for a
+late restart of its previously stopped scheduled charge and send an unwanted
+Geely OFF command. The resulting notification explicitly said "Charging
+resumed after verified stop; enforcing cancellation."
+
+Manual charge START now cancels the prior automatic watch **only after**
+passing the live safety checks, while holding the controller lock and confirming
+no automatic stop is pending. The automatic watchdog also independently
+recognises an authorised manual owner and must not stop it. If no manual
+session owns the vehicle, late charging after a verified stop still gets
+enforced. This avoids weakening the unattended delayed-start safeguard.
+
+**Comfort Cool did not issue the charging STOP directly.** Vehicle/API climate
+behaviour while charging still needs physical verification; the corrected
+control path is not yet live tested. Follow the
+[v0.3.10 supervised handoff and climate test](docs/manual-charge-watchdog-handoff-test.md).
+Do not restart HA while charging.
+
 ## Four-tab EV Control Centre (v0.3.9)
 
 The HACS-provisioned dashboard now follows the original screenshot design,
