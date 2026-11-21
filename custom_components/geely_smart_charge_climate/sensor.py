@@ -39,6 +39,7 @@ async def async_setup_entry(
         LiveTestStatusSensor(entry),
         AutomaticChargeStatusSensor(entry),
         ManualClimateStatusSensor(entry),
+        ManualChargingStatusSensor(entry),
     ])
 
 
@@ -457,6 +458,40 @@ class ManualClimateStatusSensor(SensorEntity):
             "message": self.entry.runtime_data.climate.message,
             "manual_only": True,
             "scheduled_climate_active": False,
+        }
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self.async_on_remove(self.entry.runtime_data.listen(self.async_write_ha_state))
+
+
+class ManualChargingStatusSensor(SensorEntity):
+    """Product-facing manual charge state, without temporary arming jargon."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Manual charging status"
+    _attr_icon = "mdi:battery-charging"
+
+    def __init__(self, entry):
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_manual_charge_status"
+
+    @property
+    def native_value(self):
+        status = self.entry.runtime_data.status
+        return {"DISARMED": "IDLE", "ARMED": "READY",
+                "RUNNING": "CHARGING"}.get(status, status)
+
+    @property
+    def extra_state_attributes(self):
+        runtime = self.entry.runtime_data
+        return {
+            "message": runtime.message,
+            "target": runtime.target,
+            "active_target": runtime.active_target,
+            "owns_manual_session": runtime.owned,
+            "stop_pending": runtime.stop_requested_at is not None,
+            "automatic_charging_paused_during_manual": runtime.auto.mode == "Off",
         }
 
     async def async_added_to_hass(self):
