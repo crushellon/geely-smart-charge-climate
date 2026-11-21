@@ -160,7 +160,9 @@ def dashboard_config(
             f"Status: **{{{{ states('{entity_ids['automatic_charge_decision']}') }}}}**  \n"
             f"Reason: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'message') or '—' }}}}  \n"
             f"Home confirmed: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'home_confirmed') }}}}  \n"
-            f"Next ready by: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'ready_by') or '—' }}}}",
+            f"Next ready by: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'ready_by') or '—' }}}}  \\n"
+            f"Enabled days: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'enabled_schedule_days') or [] }}}}  \\n"
+            f"Live policy: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'live_policy_reason') or '—' }}}}",
         },
     ]
 
