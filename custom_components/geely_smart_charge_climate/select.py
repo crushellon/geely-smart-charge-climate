@@ -6,6 +6,8 @@ from homeassistant.components.select import SelectEntity
 
 from .comfort import PROFILES
 from .comfort_display import SEAT_OPTIONS, get_seat_mode, set_seat_mode
+from .climate_schedule import SLOTS, DAYS
+from .climate_schedule_entities import ClimateScheduleSetting
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -13,7 +15,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities([
         ComfortSeatSelect(hass, entry, profile, occupant)
         for profile in PROFILES for occupant in ("driver", "passenger")
-    ])
+    ] + [ClimateSlotSelect(hass, entry, slot, field)
+         for slot in SLOTS for field in ('day', 'driver_seat', 'passenger_seat')])
 
 
 class ComfortSeatSelect(SelectEntity):
@@ -41,3 +44,20 @@ class ComfortSeatSelect(SelectEntity):
         )
         self.hass.config_entries.async_update_entry(self.entry, options=updated)
         self.async_write_ha_state()
+
+
+class ClimateSlotSelect(ClimateScheduleSetting, SelectEntity):
+    """Per-slot weekday and seat comfort dropdowns."""
+
+    _attr_icon = "mdi:calendar"
+
+    def __init__(self, hass, entry, slot, field):
+        super().__init__(hass, entry, slot, field)
+        self._attr_options = list(DAYS if field == "day" else SEAT_OPTIONS)
+
+    @property
+    def current_option(self):
+        return self.current
+
+    async def async_select_option(self, option):
+        await self.save(option)
