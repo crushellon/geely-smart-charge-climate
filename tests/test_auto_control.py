@@ -38,6 +38,9 @@ env = {
     "PUBLIC_MODE": safety.PUBLIC_MODE,
     "EMERGENCY_STOP": safety.EMERGENCY_STOP,
     "DEFAULT_EFFECTIVE_KW": 6.5,
+    "DOMAIN": "geely_smart_charge_climate",
+    "er": SimpleNamespace(async_get=lambda hass: SimpleNamespace(
+        async_get_entity_id=lambda *a: None)),
     "DEFAULT_USABLE_CAPACITY_KWH": 68.39,
     "HOME_WALL_CONNECTOR": "binary_sensor.tesla_wall_connector_vehicle_connected",
     "MODES": ("Off", "Monitor", "Active"),
