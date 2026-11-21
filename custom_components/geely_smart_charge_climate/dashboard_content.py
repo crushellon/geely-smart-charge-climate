@@ -351,7 +351,7 @@ def dashboard_config(
     info = {"type": "markdown", "content":
         "**Charging-linked comfort** uses the same ready-by time as charging. "
         "Choose Cool/Warm on the charging schedule; its settings are on "
-        "Comfort Settings. **Scheduled climate commands are not enabled yet.**"}
+        "Comfort Settings. **Climate preconditioning is active when enabled.**"}
     extra_sensors = extra_sensors or {}
     charger_sensors = charger_sensors or {}
 
