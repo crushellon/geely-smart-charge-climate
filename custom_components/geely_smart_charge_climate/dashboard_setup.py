@@ -23,6 +23,7 @@ from .discovery import discover_plug_entity, discover_charging_power_entity
 from .dashboard_content import DAYS, dashboard_config
 from .comfort import PROFILES, FIELDS
 from .climate_schedule import SLOTS
+from .manual_climate import geely_climate_entities
 
 _LOGGER = logging.getLogger(__name__)
 DASHBOARD_PATH = "geely-ev-control-centre"
@@ -43,7 +44,25 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
         "live_test_target": ("number", f"{entry.entry_id}_live_test_target"),
         "live_test_start": ("button", f"{entry.entry_id}_live_test_start"),
         "live_test_stop": ("button", f"{entry.entry_id}_live_test_stop"),
+        "automatic_charging_enabled": ("switch", f"{entry.entry_id}_automatic_charging_enabled"),
+        "emergency_stop": ("switch", f"{entry.entry_id}_emergency_stop"),
+        "manual_charge_target": ("number", f"{entry.entry_id}_live_test_target"),
+        "manual_charge_status": ("sensor", f"{entry.entry_id}_manual_charge_status"),
+        "manual_cabin_temperature": ("number", f"{entry.entry_id}_manual_cabin_temperature"),
+        "manual_climate_status": ("sensor", f"{entry.entry_id}_manual_climate_status"),
     }
+    for action in ("start", "stop", "quick80", "quick100", "resume"):
+        unique_ids[f"manual_charge_{action}"] = (
+            "button", f"{entry.entry_id}_manual_charge_{action}"
+        )
+    for action in ("stop", "release"):
+        unique_ids[f"emergency_{action}"] = (
+            "button", f"{entry.entry_id}_emergency_{action}"
+        )
+    for action in ("cool", "warm", "custom", "off"):
+        unique_ids[f"manual_climate_{action}"] = (
+            "button", f"{entry.entry_id}_manual_climate_{action}"
+        )
     for day in DAYS:
         unique_ids.update({
             f"{day}_enabled": ("switch", f"{entry.entry_id}_{day}_enabled"),
@@ -139,6 +158,15 @@ def _optional_vehicle_sensors(hass, entry) -> dict[str, str]:
     return result
 
 
+def _optional_geely_climate(hass, entry) -> str | None:
+    """Use the selected Geely vehicle's climate entity only when available."""
+    entity = geely_climate_entities(entry.data[CONF_BATTERY_ENTITY]).get("climate")
+    if not entity:
+        return None
+    record = er.async_get(hass).async_get(entity)
+    return entity if record is not None and record.disabled_by is None else None
+
+
 def _optional_wall_connector_sensors(hass) -> dict[str, str]:
     """Show connected Tesla wall connector measurements only if present.
 
@@ -199,12 +227,13 @@ async def async_ensure_dashboard(hass, entry) -> None:
         charging_switch=entry.data.get(CONF_CHARGING_SWITCH),
         extra_sensors=_optional_vehicle_sensors(hass, entry),
         charger_sensors=_optional_wall_connector_sensors(hass),
+        climate_entity=_optional_geely_climate(hass, entry),
     )
     # Dashboard metadata registration persists across Home Assistant restarts.
     item = await collection.async_create_item(
         {
             "url_path": DASHBOARD_PATH,
-            "title": "Geely EV Control Centre (Test)",
+            "title": "Geely EV Control Centre",
             "icon": "mdi:ev-station",
             "show_in_sidebar": True,
             "require_admin": False,
@@ -218,7 +247,7 @@ async def async_ensure_dashboard(hass, entry) -> None:
         frontend_url_path=DASHBOARD_PATH,
         require_admin=False,
         show_in_sidebar=True,
-        sidebar_title="Geely EV Control Centre (Test)",
+        sidebar_title="Geely EV Control Centre",
         sidebar_icon="mdi:ev-station",
         config={"mode": "storage"},
     )
@@ -249,6 +278,7 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
             _LOGGER.info("Four-page dashboard was customized; preserving layout")
             return
         await _refresh_generated_dashboard(hass, entry, stored_dashboard)
+        await _rename_generated_dashboard(hass)
         return
     if paths != ["charging", "climate", "schedule", "statistics"]:
         _LOGGER.info("Test dashboard was customized; preserving current layout")
@@ -305,6 +335,8 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
                         or discover_charging_power_entity(hass, entry.data[CONF_BATTERY_ENTITY])),
         charging_switch=entry.data.get(CONF_CHARGING_SWITCH),
         extra_sensors=_optional_vehicle_sensors(hass, entry),
+        charger_sensors=_optional_wall_connector_sensors(hass),
+        climate_entity=_optional_geely_climate(hass, entry),
     )
     await stored_dashboard.async_save(new_config)
 
@@ -316,18 +348,47 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
     )
     if stored and stored.get("title") in ("EV Control Centre", "Geely EV Control Centre (Test)"):
         await collection.async_update_item(
-            stored["id"], {"title": "Geely EV Control Centre (Test)"}
+            stored["id"], {"title": "Geely EV Control Centre"}
         )
         if frontend.async_panel_exists(hass, DASHBOARD_PATH):
             frontend.async_register_built_in_panel(
                 hass, "lovelace",
                 frontend_url_path=DASHBOARD_PATH,
                 require_admin=False, show_in_sidebar=True,
-                sidebar_title="Geely EV Control Centre (Test)",
+                sidebar_title="Geely EV Control Centre",
                 sidebar_icon="mdi:ev-station",
                 config={"mode": "storage"}, update=True,
             )
     _LOGGER.info("Migrated generated test dashboard to four focused pages")
+
+
+async def _rename_generated_dashboard(hass) -> None:
+    """Remove the development suffix from the integration-generated sidebar.
+
+    Only known old titles are migrated. Never rename a user-created dashboard.
+    """
+    try:
+        collection = DashboardsCollection(hass)
+        await collection.async_load()
+        stored = next(
+            (item for item in collection.async_items()
+             if item.get("url_path") == DASHBOARD_PATH), None,
+        )
+        if stored and stored.get("title") == "Geely EV Control Centre (Test)":
+            await collection.async_update_item(
+                stored["id"], {"title": "Geely EV Control Centre"}
+            )
+            if frontend.async_panel_exists(hass, DASHBOARD_PATH):
+                frontend.async_register_built_in_panel(
+                    hass, "lovelace",
+                    frontend_url_path=DASHBOARD_PATH,
+                    require_admin=False, show_in_sidebar=True,
+                    sidebar_title="Geely EV Control Centre",
+                    sidebar_icon="mdi:ev-station",
+                    config={"mode": "storage"}, update=True,
+                )
+    except Exception:
+        _LOGGER.exception("Could not rename generated EV dashboard")
 
 
 def _is_generated_four_page_dashboard(views) -> bool:
@@ -347,13 +408,15 @@ def _is_generated_four_page_dashboard(views) -> bool:
         len(views) == 4
         and len(left) >= 4
         and left[0].get("type") == "markdown"
-        and "Geely Smart Charge & Climate" in left[0].get("content", "")
+        and ("Geely Smart Charge & Climate" in left[0].get("content", "")
+             or "Geely EX5" in left[0].get("content", ""))
         and bool(right)
         and right[0].get("title") == "Seven-day charging schedule"
         and len(slots) == 7
         and len(comfort) >= 3
-        and [card.get("title") for card in comfort[-2:]]
-        == ["Cool profile", "Warm profile"]
+        and (
+            ("Cool profile" in str(comfort) and "Warm profile" in str(comfort))
+        )
     )
 
 
@@ -370,6 +433,8 @@ async def _refresh_generated_dashboard(hass, entry, stored_dashboard) -> None:
                         or discover_charging_power_entity(hass, entry.data[CONF_BATTERY_ENTITY])),
         charging_switch=entry.data.get(CONF_CHARGING_SWITCH),
         extra_sensors=_optional_vehicle_sensors(hass, entry),
+        charger_sensors=_optional_wall_connector_sensors(hass),
+        climate_entity=_optional_geely_climate(hass, entry),
     )
     try:
         old = await stored_dashboard.async_load(False)

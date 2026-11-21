@@ -2,9 +2,59 @@
 
 An early **experimental integration** for Home Assistant, designed for the **Geely EX5** using community Geely Connect telemetry. Other Geely models have not been verified.
 
-**Safety (experimental):** The proven manual start/stop test remains available. The automatic controller offers **Off / Monitor / Active** modes. Off is the default after every restart. Monitor makes read-only authorisation decisions; Active can issue guarded scheduled starts and stops using **Geely Connect only**. **This is for attended testing, not yet unattended charging.** Never run alongside another active charging controller. Read [the automatic test checklist](docs/automatic-charging-test.md) before enabling Active.
+**Safety (experimental):** The normal EV Control dashboard now exposes an **Automatic charging enabled** switch, not the developer Off / Monitor / Active selection. The switch is session-only: Home Assistant restart resets it to Off until safe restart recovery is implemented. When enabled, it authorises schedule-based Geely Connect charging. The underlying diagnostic modes remain available in Home Assistant's entity registry for troubleshooting only. **Do not rely on this integration for unattended departure charging yet.** Disable previous charging-command automations before using it and see [the new dashboard test checklist](docs/product-dashboard-test.md).
 
 **Public charging responsibility:** Turn **Public charging mode ON before connecting to any public charger**, and turn it OFF when returning to normal automatic charging. The integration does not detect home location or public charging automatically. When ON, automatic charging starts, unexpected-charge stops and manual charging commands from this integration are suppressed. The native switch persists across Home Assistant restarts. Existing `input_boolean.ev_public_charging_mode` installations are still honoured as an additional interlock, so both must be OFF to resume normal charging. The optional Tesla Wall Connector is never required for core control.
+
+## Four-tab EV Control Centre (v0.3.9)
+
+The HACS-provisioned dashboard now follows the original screenshot design,
+using built-in Home Assistant cards:
+
+- **EV Control:** Geely battery/range/charge summary, Automatic charging enabled,
+  Public Charging Mode, independent emergency STOP/release, manual target preview
+  and Start/Stop/Quick 80%/Quick 100%/Resume schedule, direct Cool/Warm/custom/off
+  cabin controls, and the seven-day **vehicle ready-at** charging schedule.
+- **Comfort Settings:** Expandable Cool/Warm temperatures, seat heating/
+  ventilation, steering wheel settings, and shared charge-linked lead/hold time.
+- **Climate Scheduler:** Seven editable independent cabin appointments. They
+  remain **simulation-only**; enabling one does not run climate.
+- **EX5 Stats:** Read-only gauges, range, energy efficiency, tyre measurements,
+  vehicle health, battery/charging history. An optional Tesla Wall Connector
+  may contribute **display-only** power, never charging authorisation.
+
+Manual charge buttons now initiate a charge directly through Geely Connect,
+without exposing temporary test arming. **Start manual pauses automatic
+charging until the separate Resume schedule button is pressed.** If an
+automatic scheduled session is already active, stop/verify it before issuing
+manual Start; the new manual action will refuse overlapping control.
+The manual Stop path uses post-command Geely telemetry, 30-second settling,
+and a five-minute watch for delayed charging.
+
+Manual Cool/Warm, custom temperature and climate + seats OFF now submit
+direct Geely climate commands to the matching vehicle climate, seat and
+steering entities when present; these are **new, not yet live-tested** and
+are separate from automated comfort schedules. Status means commands were
+submitted, not independently verified by the car. Do not run the original
+EVCC climate reconciler concurrently when testing these buttons.
+
+The new **Emergency STOP** latches an integration-owned emergency interlock
+and requests an Off command, including when no charging schedule is owned.
+Release does **not** automatically enable charging. Public Charging Mode
+still suppresses all integration charging commands, including emergency Off
+requests; turn it on for public charging and use the vehicle's own controls
+for public-session stopping.
+
+The old armed-test entities are no longer displayed but remain present
+for development compatibility. A known, unmodified generated four-tab test
+dashboard is migrated on restart. Manually customized and separate dashboards
+are preserved. The existing sidebar entry is renamed without deleting
+its URL or recreating the dashboard.
+
+**Important:** The automatic switch still resets to Off after a restart;
+interruption recovery and automatic scheduled climate have not been
+production-validated. Follow [v0.3.9 install and test steps](docs/product-dashboard-test.md)
+before regular use.
 
 ## Live schedule edits (v0.3.5)
 
@@ -96,12 +146,12 @@ The initial tracked version must be installed from HACS once; copying ZIP files 
 
 The setup wizard suggests matching EX5 sensors, including battery state, charging switch, and optional **Geely** charging power. The Geely plug sensor must also be discoverable for automatic starts; missing plug confirmation blocks a start. External charger telemetry is optional. It uses a standard 7 kW single-phase charger rating by default and calculates initial battery-side estimates internally. Charging-rate learning collects reliable SOC changes and saves recent samples.
 
-After adding the integration, use the generated **Geely EV Control Centre (Test)** dashboard. Its Charging, Comfort Settings, Climate Scheduler and Vehicle Data pages use native Home Assistant cards. All seven charging days and climate slots start disabled. The charging schedule becomes live only when the automatic controller is explicitly set to Active; the seven independent climate slots remain simulation-only.
+After adding the integration, use the generated **Geely EV Control Centre** dashboard. Its EV Control, Comfort Settings, Climate Scheduler and EX5 Stats tabs use native Home Assistant cards, matching the earlier EV Control Centre. All seven charging days and independent climate slots start disabled on a new installation. Enable automatic charging explicitly on EV Control; climate slots remain simulation-only.
 
 The integration exposes read-only `Observer status`, `Simulation decision`, `Next climate session`, `Live test status`, and `Automatic charging decision` sensors. Any simulated `START`, `WAIT` or `STOP_AT_TARGET` value is a recommendation **only**, not proof that a command has been sent. A 100% target always uses vehicle-managed termination in the simulator and in the attended live test (unless the user explicitly requests a stop or an emergency interlock is activated).
 
 ## Development status
 
-This is an **EX5-focused pre-release** under active testing, not yet a finished unattended charging controller. Live charging commands require either an armed manual test or explicitly selecting Active automatic mode. **Off and Monitor never send automatic commands.** No Tesla or other smart charger is required; the user-operated public charging switch defines when automatic charging must be suppressed. HA notifications record decisions during Active mode. Check the [development documentation](docs/read-only-milestone.md) and [repository issues](https://github.com/crushellon/geely-smart-charge-climate/issues).
+This is an **EX5-focused pre-release** under active testing, not yet a finished unattended charging controller. Normal manual charging buttons request real Geely vehicle actions; the automatic charging switch must be turned on separately for schedules. Off/Monitor/Active remain only internal developer states. **The normal automatic control switch resets Off on restart.** No Tesla or other smart charger is required; the user-operated public charging switch defines when automatic charging must be suppressed. HA notifications record decisions during Active mode. Check the [development documentation](docs/read-only-milestone.md) and [repository issues](https://github.com/crushellon/geely-smart-charge-climate/issues).
 
 Run offline checks using `python -m unittest discover -s tests -v`.

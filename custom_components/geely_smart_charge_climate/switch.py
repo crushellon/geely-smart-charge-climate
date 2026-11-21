@@ -19,7 +19,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         + [ClimateSlotEnabled(hass, entry, slot, 'enabled') for slot in SLOTS]
         + [ClimateSlotEnabled(hass, entry, slot, 'steering_heat') for slot in SLOTS]
         + [ChargingLinkedComfortSwitch(hass, entry, day) for day in DAY_NAMES]
-        + [LiveTestArmSwitch(entry), PublicChargingModeSwitch(hass, entry)]
+        + [LiveTestArmSwitch(entry), PublicChargingModeSwitch(hass, entry), AutomaticChargingEnabledSwitch(entry), EmergencyStopSwitch(hass, entry)]
     )
 
 
@@ -210,3 +210,63 @@ class PublicChargingModeSwitch(SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         await self._save(False)
+
+
+class AutomaticChargingEnabledSwitch(SwitchEntity):
+    """Normal charging-schedule on/off control for the EV Control dashboard.
+
+    For this experimental release, activation is deliberately session-only.
+    A restart disarms automatic charging until recovery is proven; the
+    dashboard prominently explains this instead of implying persistence.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Automatic charging enabled"
+    _attr_icon = "mdi:calendar-check"
+
+    def __init__(self, entry):
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_automatic_charging_enabled"
+
+    @property
+    def is_on(self):
+        return self.entry.runtime_data.auto.mode == "Active"
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self.entry.runtime_data.listen(self.async_write_ha_state)
+        )
+
+    async def async_turn_on(self, **kwargs):
+        await self.entry.runtime_data.auto.async_set_mode("Active")
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        await self.entry.runtime_data.auto.async_set_mode("Off")
+        self.async_write_ha_state()
+
+
+class EmergencyStopSwitch(SwitchEntity):
+    """Persistent emergency interlock, with explicit release."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Emergency stop"
+    _attr_icon = "mdi:alert-octagon"
+
+    def __init__(self, hass, entry):
+        self.hass = hass
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_emergency_stop"
+
+    @property
+    def is_on(self):
+        return self.entry.options.get("emergency_stop", False) is True
+
+    async def async_turn_on(self, **kwargs):
+        await self.entry.runtime_data.async_emergency_stop()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        await self.entry.runtime_data.async_release_emergency_stop()
+        self.async_write_ha_state()
