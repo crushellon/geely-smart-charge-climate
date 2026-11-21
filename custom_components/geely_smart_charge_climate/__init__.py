@@ -25,6 +25,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await entry.runtime_data.async_start_listening()
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        # Start only after options and all entity platforms are restored;
+        # old manual/automatic sessions are adopted without a blind ON.
+        await entry.runtime_data.async_restore()
     except Exception:
         await entry.runtime_data.async_shutdown()
         raise
