@@ -19,7 +19,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         + [ClimateSlotEnabled(hass, entry, slot, 'enabled') for slot in SLOTS]
         + [ClimateSlotEnabled(hass, entry, slot, 'steering_heat') for slot in SLOTS]
         + [ChargingLinkedComfortSwitch(hass, entry, day) for day in DAY_NAMES]
-        + [LiveTestArmSwitch(entry), PublicChargingModeSwitch(hass, entry), AutomaticChargingEnabledSwitch(entry)]
+        + [LiveTestArmSwitch(entry), PublicChargingModeSwitch(hass, entry), AutomaticChargingEnabledSwitch(entry), EmergencyStopSwitch(hass, entry)]
     )
 
 
@@ -244,4 +244,29 @@ class AutomaticChargingEnabledSwitch(SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         await self.entry.runtime_data.auto.async_set_mode("Off")
+        self.async_write_ha_state()
+
+
+class EmergencyStopSwitch(SwitchEntity):
+    """Persistent emergency interlock, with explicit release."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Emergency stop"
+    _attr_icon = "mdi:alert-octagon"
+
+    def __init__(self, hass, entry):
+        self.hass = hass
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_emergency_stop"
+
+    @property
+    def is_on(self):
+        return self.entry.options.get("emergency_stop", False) is True
+
+    async def async_turn_on(self, **kwargs):
+        await self.entry.runtime_data.async_emergency_stop()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        await self.entry.runtime_data.async_release_emergency_stop()
         self.async_write_ha_state()
