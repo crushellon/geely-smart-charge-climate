@@ -37,6 +37,9 @@ An early **experimental integration** for Home Assistant, designed for the **Gee
   occurrence. The previous occurrence is suppressed so it cannot immediately
   override the manual request. Manual climate remains in priority mode until
   Climate + seats OFF is pressed, after which future appointments can run.
+- On upgrade from simulation-only climate, the persistent **Scheduled climate enabled**
+  master switch defaults OFF so previous experimental slots cannot activate
+  the car unexpectedly. Enable it intentionally when ready to use live climate.
 - Every climate occurrence and charging owner transition is persisted to
   avoid repetitive cloud commands after HA restarts. Diagnostic sensors show
   live state and errors. Unavailable Geely climate entities are reported rather
