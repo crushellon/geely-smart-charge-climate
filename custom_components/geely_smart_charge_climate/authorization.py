@@ -22,6 +22,22 @@ class ChargeDecision:
     ready_by: datetime | None = None
 
 
+def charge_start_at(
+    ready_by: datetime, *, target: int, soc: float, rate_kw: float,
+    capacity_kwh: float, buffer_minutes: int = 15,
+) -> datetime:
+    """Use one shared calculation for scheduled starts and active replans.
+
+    A zero-energy top-up has no safety buffer. Call only with validated
+    battery state, charger rate, capacity and user schedule settings.
+    """
+    remaining = max(0.0, target - soc)
+    minutes = ceil(remaining / 100 * capacity_kwh / rate_kw * 60)
+    return ready_by - timedelta(
+        minutes=minutes + (buffer_minutes if minutes else 0)
+    )
+
+
 def decide(
     *, now: datetime, schedule: dict, soc: float | None, charging: bool,
     plugged: bool | None,
@@ -76,9 +92,10 @@ def decide(
             next_ready += timedelta(days=7)
         for ready in (next_ready, next_ready - timedelta(days=7)):
             target = item["target"]
-            remaining = max(0.0, target - soc)
-            minutes = ceil(remaining / 100 * capacity_kwh / rate_kw * 60)
-            start = ready - timedelta(minutes=minutes + (buffer_minutes if minutes else 0))
+            start = charge_start_at(
+                ready, target=target, soc=soc, rate_kw=rate_kw,
+                capacity_kwh=capacity_kwh, buffer_minutes=buffer_minutes,
+            )
             candidates.append({
                 "day": day, "target": target,
                 "start_at": start, "ready_by": ready,
