@@ -5,6 +5,8 @@ from .schedule_entities import ScheduleEntity
 from .comfort import PROFILES, get_value, set_value
 from .comfort_display import get_profile_visible, set_profile_visible
 from .weekly_schedule import DAY_NAMES
+from .climate_schedule import SLOTS
+from .climate_schedule_entities import ClimateScheduleSetting
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -13,6 +15,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         [DayEnabledSwitch(hass, entry, day, "enabled") for day in DAY_NAMES]
         + [SteeringPreferenceSwitch(hass, entry, profile) for profile in PROFILES]
         + [ComfortExpandSwitch(hass, entry, profile) for profile in PROFILES]
+        + [ClimateSlotEnabled(hass, entry, slot, 'enabled') for slot in SLOTS]
     )
 
 
@@ -90,3 +93,19 @@ class ComfortExpandSwitch(SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         await self._save(False)
+
+
+class ClimateSlotEnabled(ClimateScheduleSetting, SwitchEntity):
+    """One independent weekly climate slot enable toggle (simulation-only)."""
+
+    _attr_icon = "mdi:calendar-clock"
+
+    @property
+    def is_on(self):
+        return self.current
+
+    async def async_turn_on(self, **kwargs):
+        await self.save(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self.save(False)
