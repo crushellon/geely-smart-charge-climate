@@ -387,6 +387,20 @@ class AutomaticChargeStatusSensor(SensorEntity):
             "linked_comfort_commands_enabled": False,
             "stop_attempts": auto.stop_attempts,
             "stop_confirmation_pending": auto.stop_requested_at is not None,
+            "stop_verification": (
+                "Awaiting fresh Geely telemetry"
+                if auto.stop_requested_at is not None and not auto._stop_telemetry_fresh()
+                else "Charging still reported; stop not verified"
+                if auto.stop_requested_at is not None and auto._charging()
+                else "Settling and checking stop"
+                if auto.stop_requested_at is not None
+                else "Watching for delayed charging"
+                if auto.stop_watch_until is not None
+                   and dt_util.utcnow() < auto.stop_watch_until
+                else "Idle"
+            ),
+            "stop_watch_until": auto.stop_watch_until.isoformat()
+                                if auto.stop_watch_until else None,
             "last_event": auto.last_event,
             "restarts_disarm_controller": True,
             "climate_commands_enabled": False,
