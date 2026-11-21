@@ -1,7 +1,6 @@
-"""Explicit user-pressed manual charging test commands.
+"""Explicit normal user charge, emergency and manual cabin buttons.
 
-Buttons are inert unless a live test is armed. They do not activate a weekly
-schedule or any climate preset.
+No exposed arm-test button is required; native controls call Geely services.
 """
 from homeassistant.components.button import ButtonEntity
 
