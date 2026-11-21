@@ -498,7 +498,13 @@ class AutomaticChargeController:
             # Keep watching recent integration-owned stops even when Off:
             # a delayed Geely start can arrive AFTER initial OFF feedback.
             if self.stop_watch_until is not None:
-                if dt_util.utcnow() >= self.stop_watch_until:
+                if self.manual.owned:
+                    # An explicitly authorised manual charge is a NEW session,
+                    # not a rebound from an earlier automatic STOP. The manual
+                    # controller now owns both the vehicle and its eventual
+                    # stop verification. Never cancel that charge here.
+                    self.stop_watch_until = None
+                elif dt_util.utcnow() >= self.stop_watch_until:
                     self.stop_watch_until = None
                 elif self.stop_requested_at is None and self._charging():
                     await self._request_stop(

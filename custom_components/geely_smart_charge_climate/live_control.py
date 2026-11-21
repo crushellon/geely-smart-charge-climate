@@ -258,8 +258,24 @@ class LiveChargeController:
                 self.message = reason
                 self._notify()
                 return
+            # Transfer vehicle authority atomically to the explicit manual
+            # charge. Without this, an earlier automatic STOP's five-minute
+            # delayed-start watchdog sees the manual START and issues OFF.
+            # Do not clear the watchdog if preflight was blocked, and do not
+            # take over a still-pending automatic stop verification.
+            async with self.auto._lock:
+                if self.auto.owned or self.auto.stop_requested_at is not None:
+                    self.status = "BLOCKED"
+                    self.message = (
+                        "Automatic charge stop is still being verified; "
+                        "manual start is blocked"
+                    )
+                    self._notify()
+                    return
+                self.auto.stop_watch_until = None
+                self.auto.unexpected_since = None
+                self.owned = True
             self.stop_watch_until = None
-            self.owned = True
             self.active_target = self.target
             self.started_at = dt_util.utcnow()
             self.observed_active = False

@@ -28,6 +28,8 @@ class DummyAutomatic:
         self.owned = False
         self.stop_requested_at = None
         self.mode = "Off"
+        self.stop_watch_until = None
+        self.unexpected_since = None
         self._lock = asyncio.Lock()
 
     async def async_set_mode(self, mode):
@@ -198,6 +200,34 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.controller.async_tick()
         await self.controller.async_tick()
         self.assertEqual(self.controller.status, "STOPPED")
+
+    async def test_authorised_manual_start_cancels_old_auto_rebound_watch(self):
+        # Recreate a prior automatic STOP followed by a genuine manual START.
+        self.controller.auto.stop_watch_until = (
+            datetime.now(timezone.utc) + timedelta(minutes=5)
+        )
+        await self.controller.async_start_manual(80)
+        self.assertTrue(self.controller.owned)
+        self.assertIsNone(self.controller.auto.stop_watch_until)
+        self.assertEqual([call[1] for call in self.services.calls], ["turn_on"])
+
+    async def test_blocked_manual_start_preserves_old_auto_rebound_watch(self):
+        # Do not silently disable protection for a manual request that fails
+        # preflight (for example, unplugged vehicle).
+        watch = datetime.now(timezone.utc) + timedelta(minutes=5)
+        self.controller.auto.stop_watch_until = watch
+        self.states.data["binary_sensor.plug"].state = "off"
+        await self.controller.async_start_manual(80)
+        self.assertFalse(self.controller.owned)
+        self.assertEqual(self.services.calls, [])
+        self.assertEqual(self.controller.auto.stop_watch_until, watch)
+
+    async def test_manual_start_waits_for_pending_automatic_stop_confirmation(self):
+        self.controller.auto.stop_requested_at = datetime.now(timezone.utc)
+        await self.controller.async_start_manual(80)
+        self.assertFalse(self.controller.owned)
+        self.assertEqual(self.services.calls, [])
+        self.assertEqual(self.controller.status, "BLOCKED")
 
     async def test_manual_start_pauses_auto_until_resume(self):
         self.controller.auto.mode = "Active"

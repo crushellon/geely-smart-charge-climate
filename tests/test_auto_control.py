@@ -193,6 +193,41 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertEqual(self.auto.mode, "Off")
 
+    async def test_old_auto_stop_watchdog_never_stops_authorised_manual_charge(self):
+        # Real incident: auto verified an earlier stop, then Comfort Cool was
+        # pressed after a new manual charge. It was the old auto watchdog
+        # (not the climate command) which issued the unwanted charging OFF.
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_set_mode("Off")
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+        self.assertIsNotNone(self.auto.stop_watch_until)
+        # Manual controller has since authorised and started a NEW session.
+        self.manual.owned = True
+        self.values["switch.car"] = "on"
+        self.values["sensor.power"] = "6.89"
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertIsNone(self.auto.stop_watch_until)
+        self.assertIsNone(self.auto.stop_requested_at)
+
+    async def test_auto_stop_watchdog_still_catches_unauthorised_rebound(self):
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_set_mode("Off")
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertIsNotNone(self.auto.stop_watch_until)
+        self.manual.owned = False
+        self.values["switch.car"] = "on"
+        self.values["sensor.power"] = "6.89"
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.assertEqual(self.services.calls, [
+            "turn_on", "turn_off", "turn_off",
+        ])
+
     async def test_public_mode_suppresses_post_stop_watchdog(self):
         await self.auto.async_set_mode("Active")
         await self.auto.async_set_mode("Off")
