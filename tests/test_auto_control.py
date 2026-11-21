@@ -160,6 +160,9 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_editing_live_target_above_soc_refreshes_display_then_stops(self):
         self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        # This edited 1% top-up is already inside its charging window:
+        # 7 minutes of energy plus 15-minute buffer before 06:20.
+        self.entry.options["weekly_schedule"]["monday"]["ready_time"] = "06:20"
         await self.auto.async_set_mode("Active")
         self.values["sensor.battery"] = "78"
         self.entry.options["weekly_schedule"]["monday"]["target"] = 79
