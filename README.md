@@ -2,9 +2,55 @@
 
 An early **experimental integration** for Home Assistant, designed for the **Geely EX5** using community Geely Connect telemetry. Other Geely models have not been verified.
 
-**Current build (v0.3.11, live functions require EX5 validation):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Independent and charging-linked cabin climate appointments issue real Geely commands **after you enable the new Scheduled climate enabled master switch**, with manual priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
+**Current build (v0.3.12 — finished four-tab dashboard and accurate physical charging state; EX5 validation still required):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Independent and charging-linked cabin climate appointments issue real Geely commands **after you enable the new Scheduled climate enabled master switch**, with manual priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
 
 **Public charging responsibility:** Turn **Public charging mode ON before connecting to any public charger**, and turn it OFF when returning to normal automatic charging. The integration does not detect home location or public charging automatically. When ON, automatic charging starts, unexpected-charge stops and manual charging commands from this integration are suppressed. The native switch persists across Home Assistant restarts. Existing `input_boolean.ev_public_charging_mode` installations are still honoured as an additional interlock, so both must be OFF to resume normal charging. The optional Tesla Wall Connector is never required for core control.
+
+## Production dashboard and vehicle-state recovery (v0.3.12)
+
+The integration-generated dashboard now mirrors the original **EV Control,
+Comfort Settings, Climate Scheduler, EX5 Stats** design using only the intended
+real vehicle controls. The developer status and simulation panels are not
+displayed. Obsolete developer arm/test button and mode-selector classes have
+been removed. Existing normal entities retain stable unique IDs.
+
+**An observed charge is not necessarily an integration-owned charge.**
+On an upgrade from versions without persisted manual ownership, the EX5 can be
+charging while a new process has no record of the original manual target.
+Instead of incorrectly showing IDLE, the product now exposes:
+- **Vehicle charging status** (CHARGING, CHARGING_REPORTED, STOPPED, UNKNOWN),
+  source and owner attribution in Home Assistant States.
+- **Manual charging status** showing CHARGING_UNATTRIBUTED where vehicle
+  activity exists but the current controller cannot verify the manual owner.
+- **Automatic charging decision** showing EXTERNAL when an existing charge
+  is observed but not owned by the active schedule. It will not issue a
+  surprise OFF command against that unowned session.
+
+At home, an explicit **Stop manual** button still requests a guarded real
+stop for an observed session, even when its original software owner was
+lost on upgrade. A new Start chosen target/Quick 80/100 cannot commandeer
+a charge that is already underway; first stop and verify if appropriate.
+
+**Home Assistant reload/restart no longer automatically turns OFF an owned
+charge.** The persistent manual and automatic session markers are adopted
+by observation on restart, including saved pending stop requests. The
+custom manual target slider is now saved in config entry options. The
+**Resume schedule** button can rearm a paused charge even if the persistent
+Automatic charging enabled switch is already ON.
+
+The optional Tesla Wall Connector is always read-only and never required
+by the controller. When available, positive wallbox power can confirm
+observed charging while Geely cloud telemetry lags, and can prevent a
+false STOPPED confirmation while real power is still flowing.
+
+**Existing automatic preference:** v0.3.11 and later remember ON/OFF; an
+older ephemeral mode cannot be retroactively reconstructed. An OFF saved
+preference remains OFF until you deliberately turn it ON; then it persists.
+The integration does not silently turn itself ON after an upgrade.
+
+See [v0.3.12 dashboard/upgrade guide](docs/finished-dashboard-existing-charge-migration.md)
+for the exact user-facing layout and how to inspect actual features through
+Developer Tools → States, without any testing buttons.
 
 ## Persistent charging and real scheduled climate (v0.3.11)
 
