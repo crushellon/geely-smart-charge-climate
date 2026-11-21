@@ -572,7 +572,7 @@ def dashboard_config(
                 "max_columns": 2,
                 "sections": [
                     _section(all_climate[:4] + all_climate[4::2]),
-                    _section(all_climate[4::2]),
+                    _section(all_climate[5::2]),
                 ],
             },
             {
