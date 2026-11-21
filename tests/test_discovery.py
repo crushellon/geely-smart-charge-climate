@@ -22,13 +22,22 @@ class DiscoveryStaticTests(unittest.TestCase):
             self.assertNotIn("hass.services.async_call", source)
             self.assertNotIn("async_call_service", source)
 
-    def test_options_flow_is_registered(self):
-        """The weekly editor must be discoverable in Home Assistant."""
+    def test_schedule_controls_instead_of_configure_menu(self):
+        """Day settings belong in dashboard entities, not Configure."""
         tree = ast.parse((ROOT / "config_flow.py").read_text(encoding="utf-8"))
         flow = next(node for node in tree.body if isinstance(node, ast.ClassDef)
                     and node.name == "GeelySmartChargeClimateConfigFlow")
         names = {node.name for node in flow.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
-        self.assertIn("async_get_options_flow", names)
+        self.assertNotIn("async_get_options_flow", names)
+        init = (ROOT / "__init__.py").read_text(encoding="utf-8")
+        for platform in ("SWITCH", "NUMBER", "TIME"):
+            self.assertIn(f"Platform.{platform}", init)
+
+    def test_no_vehicle_commands_in_weekly_controls(self):
+        for name in ("schedule_entities.py", "switch.py", "number.py", "time.py"):
+            source = (ROOT / name).read_text(encoding="utf-8")
+            self.assertNotIn("hass.services.async_call", source)
+            self.assertNotIn("my_geely_ex5", source)
 
     def test_manifest_marks_config_flow(self):
         import json
