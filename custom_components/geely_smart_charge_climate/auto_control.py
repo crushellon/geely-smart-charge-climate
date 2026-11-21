@@ -56,7 +56,9 @@ class AutomaticChargeController:
         self.stop_attempts = 0
         self.stop_context = ""
         self.last_event = "No automatic charging action"
-        self.completed_deadlines = set()
+        # A finished session is not necessarily a completed target. Keep its
+        # outcome, target and departure date to prevent accidental restart loops.
+        self.finished_deadlines = {}
         self._lock = asyncio.Lock()
         self._last_notification = None
 
@@ -170,8 +172,21 @@ class AutomaticChargeController:
         if mode not in MODES:
             raise ValueError("Unsupported automatic controller mode")
         async with self._lock:
+            old_mode = self.mode
             self.mode = mode
             self.unexpected_since = None
+            if (mode == "Active" and old_mode != "Active"
+                    and not self.owned and self.stop_requested_at is None):
+                # For the temporary test UI, returning to Active is an
+                # explicit request to resume a previously stopped charge.
+                # Never re-arm without positive SoC, a current START policy
+                # and an actual shortfall against its requested target.
+                plan = self._policy()
+                soc = self._soc()
+                if (plan.action == "START" and plan.ready_by is not None
+                        and soc is not None and soc < plan.target):
+                    key = (plan.day, plan.ready_by.date().isoformat())
+                    self.finished_deadlines.pop(key, None)
             if self.owned and mode != "Active":
                 # Never stop a public charge, even on a mode change.
                 if self._public_mode():
@@ -196,9 +211,34 @@ class AutomaticChargeController:
         # One session per departure calendar day, even if the user edits
         # the target or ready-by clock time after starting.
         deadline_key = (plan.day, plan.ready_by.date().isoformat())
-        if deadline_key in self.completed_deadlines:
-            self._update("COMPLETED", "This scheduled charging session already ended")
-            return
+        previous = self.finished_deadlines.get(deadline_key)
+        if previous is not None:
+            soc = self._soc()
+            higher_target = plan.target > previous["target"]
+            reenabled = previous["outcome"] == "disabled"
+            if ((higher_target or reenabled)
+                    and soc is not None and soc < plan.target):
+                # An increased battery target or re-enabling a disabled
+                # schedule is a deliberate new charging request.
+                self.finished_deadlines.pop(deadline_key, None)
+            else:
+                outcome = previous["outcome"]
+                if outcome == "completed":
+                    self._update(
+                        "COMPLETED",
+                        "Previous scheduled target already reached; "
+                        "increase target to request more charging",
+                        plan,
+                    )
+                else:
+                    self._update(
+                        "PAUSED",
+                        "Previous charging session ended before target; "
+                        "use Off then Active to resume (test UI), or request "
+                        "a higher target",
+                        plan,
+                    )
+                return
         if self._public_mode() or not self._legacy_clear():
             self._update("BLOCKED", "Cannot start: public mode or safety interlock")
             return
@@ -264,7 +304,23 @@ class AutomaticChargeController:
 
     def _release(self, state, message):
         if self.owned and self.owned_day and self.owned_deadline:
-            self.completed_deadlines.add((self.owned_day, self.owned_deadline.date().isoformat()))
+            soc = self._soc()
+            reached_target = (
+                state == "COMPLETED"
+                or (state == "STOPPED" and
+                    self.stop_context == "Scheduled battery target reached"
+                    and soc is not None and soc >= self.owned_target)
+            )
+            outcome = (
+                "completed" if reached_target
+                else "disabled" if self.stop_context == "Scheduled charge disabled while running"
+                else "interrupted" if state == "INTERRUPTED"
+                else "cancelled"
+            )
+            self.finished_deadlines[
+                (self.owned_day, self.owned_deadline.date().isoformat())
+            ] = {"target": self.owned_target, "soc": soc, "outcome": outcome}
+
         self.owned = False
         self.owned_target = None
         self.owned_day = None
@@ -274,6 +330,7 @@ class AutomaticChargeController:
         self.off_checks = 0
         self.stop_requested_at = None
         self.stop_attempts = 0
+        self.stop_context = ""
         self.unexpected_since = None
         self._update(state, message)
 
@@ -391,8 +448,24 @@ class AutomaticChargeController:
                 elif self.saw_charging:
                     self.off_checks += 1
                 if self.saw_charging and self.off_checks >= 2:
-                    self._release("COMPLETED", "Geely charging session ended")
-                    self._notice("complete", "Scheduled charging completed")
+                    soc = self._soc()
+                    if soc is not None and soc >= self.owned_target:
+                        self._release("COMPLETED", "Geely finished the scheduled target")
+                        self._notice("complete", "Scheduled charging completed")
+                    else:
+                        # A charger/cloud interruption is NOT completion. Do
+                        # not silently auto-restart on transient OFF readings:
+                        # this session needs an explicit resume to avoid loops.
+                        target = self.owned_target
+                        self._release(
+                            "INTERRUPTED",
+                            f"Geely stopped before reaching {target}%; "
+                            "explicit resume required",
+                        )
+                        self._notice(
+                            "interrupted",
+                            "Geely charging ended before target; review and resume",
+                        )
                     return
                 if (
                     not self.saw_charging and self.started_at
