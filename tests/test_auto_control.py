@@ -26,7 +26,8 @@ safety = sys.modules["auto_test_package.live_safety"]
 now = datetime(2026, 11, 23, 6, tzinfo=ZoneInfo("Australia/Brisbane"))
 logs = []
 env = {
-    "asyncio": asyncio, "timedelta": timedelta, "isfinite": isfinite,
+    "asyncio": asyncio, "datetime": datetime,
+    "timedelta": timedelta, "isfinite": isfinite,
     "dt_util": SimpleNamespace(now=lambda: now,
                                utcnow=lambda: datetime.now(timezone.utc)),
     "persistent_notification": SimpleNamespace(
@@ -51,6 +52,10 @@ env = {
                    safety.EMERGENCY_STOP),
     "UNEXPECTED_GRACE": timedelta(seconds=30),
     "STOP_RETRY": timedelta(seconds=30),
+    # Existing isolated tests focus on logic, not elapsed wall-clock time.
+    # Dedicated regression tests below use real settlement time explicitly.
+    "STOP_SETTLE": timedelta(0),
+    "STOP_WATCH": timedelta(minutes=5),
     "_LOGGER": SimpleNamespace(exception=lambda *a: None),
 }
 tree = ast.parse((ROOT / "auto_control.py").read_text(encoding="utf-8"))
@@ -82,8 +87,10 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.services = FakeServices(self.values)
         self.hass = SimpleNamespace(
             states=SimpleNamespace(
-                get=lambda entity: SimpleNamespace(state=self.values[entity])
-                if entity in self.values else None),
+                get=lambda entity: SimpleNamespace(
+                    state=self.values[entity],
+                    last_reported=env["dt_util"].utcnow() + timedelta(milliseconds=1),
+                ) if entity in self.values else None),
             services=self.services,
             bus=SimpleNamespace(async_fire=lambda *a: None),
         )
@@ -101,6 +108,103 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
             _notify=lambda: None,
         )
         self.auto = Auto(self.manual)
+
+    async def test_immediate_off_does_not_verify_before_settling(self):
+        # Reproduces START -> Off within moments, when cloud feedback is not
+        # trustworthy enough to declare a verified physical stop.
+        old_utc = env["dt_util"].utcnow
+        old_settle = env["STOP_SETTLE"]
+        clock = {"time": datetime(2026, 11, 23, 0, tzinfo=timezone.utc)}
+        env["dt_util"].utcnow = lambda: clock["time"]
+        env["STOP_SETTLE"] = timedelta(seconds=30)
+        self.addCleanup(setattr, env["dt_util"], "utcnow", old_utc)
+        self.addCleanup(env.__setitem__, "STOP_SETTLE", old_settle)
+
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_set_mode("Off")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertEqual(self.auto.mode, "Off")
+        # Both cloud sensors initially claim Off/0; not enough elapsed time.
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.assertTrue(self.auto.owned)
+        # A delayed Geely start arrives while Off. It must NOT be marked stopped.
+        self.values["switch.car"] = "on"
+        self.values["sensor.power"] = "6.89"
+        clock["time"] += timedelta(seconds=12)
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.assertTrue(self.auto.owned)
+        self.assertEqual(self.auto.off_checks, 0)
+        clock["time"] += timedelta(seconds=19)
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off", "turn_off"])
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+
+    async def test_stale_cloud_readings_cannot_verify_stop(self):
+        old_utc = env["dt_util"].utcnow
+        old_settle = env["STOP_SETTLE"]
+        clock = {"time": datetime(2026, 11, 23, 0, tzinfo=timezone.utc)}
+        env["dt_util"].utcnow = lambda: clock["time"]
+        env["STOP_SETTLE"] = timedelta(seconds=30)
+        self.addCleanup(setattr, env["dt_util"], "utcnow", old_utc)
+        self.addCleanup(env.__setitem__, "STOP_SETTLE", old_settle)
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_set_mode("Off")
+        stale = clock["time"] - timedelta(seconds=20)
+        self.hass.states.get = lambda entity: SimpleNamespace(
+            state=self.values[entity], last_reported=stale
+        ) if entity in self.values else None
+        clock["time"] += timedelta(seconds=35)
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertNotEqual(self.auto.status, "STOPPED")
+        self.assertIsNotNone(self.auto.stop_requested_at)
+
+    async def test_late_charging_rebound_after_stopped_is_enforced_even_off(self):
+        # Even after two legitimate OFF observations, a delayed ON signal
+        # during the bounded watchdog must cause a new stop request.
+        old_utc = env["dt_util"].utcnow
+        old_settle = env["STOP_SETTLE"]
+        clock = {"time": datetime(2026, 11, 23, 0, tzinfo=timezone.utc)}
+        env["dt_util"].utcnow = lambda: clock["time"]
+        env["STOP_SETTLE"] = timedelta(seconds=30)
+        self.addCleanup(setattr, env["dt_util"], "utcnow", old_utc)
+        self.addCleanup(env.__setitem__, "STOP_SETTLE", old_settle)
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_set_mode("Off")
+        clock["time"] += timedelta(seconds=31)
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+        self.assertIsNotNone(self.auto.stop_watch_until)
+        self.assertEqual(self.auto.mode, "Off")
+        self.values["switch.car"] = "on"
+        self.values["sensor.power"] = "6.89"
+        clock["time"] += timedelta(seconds=12)
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.assertEqual(self.services.calls, [
+            "turn_on", "turn_off", "turn_off"
+        ])
+        self.assertEqual(self.auto.mode, "Off")
+
+    async def test_public_mode_suppresses_post_stop_watchdog(self):
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_set_mode("Off")
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+        self.entry.options["public_charging_mode"] = True
+        self.values["switch.car"] = "on"
+        self.values["sensor.power"] = "6.89"
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertIsNone(self.auto.stop_watch_until)
 
     async def test_default_off_no_commands(self):
         await self.auto.async_tick()
