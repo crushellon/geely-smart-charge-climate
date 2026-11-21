@@ -58,13 +58,9 @@ def validate_field(field: str, value):
             raise ValueError("Invalid seat mode")
     elif field in TIMING_FIELDS:
         if (isinstance(value, bool) or not isinstance(value, (int, float))
-                or not isfinite(value) or not value.is_integer() if isinstance(value, float)
-                else False):
-            raise ValueError("Minutes must be whole numbers")
-        if not isinstance(value, int) and not isinstance(value, float):
-            raise ValueError("Minutes must be numeric")
-        if int(value) != value or not 0 <= value <= 120:
-            raise ValueError("Minutes must be 0–120")
+                or not isfinite(value) or int(value) != value
+                or not 0 <= value <= 120):
+            raise ValueError("Minutes must be an integer from 0 to 120")
         value = int(value)
     else:
         raise ValueError("Unsupported climate schedule field")
