@@ -33,7 +33,7 @@ class DiscoveryStaticTests(unittest.TestCase):
         self.assertIn("if self.mode == \"Monitor\"", auto)
         self.assertIn("start_preflight(", auto)
 
-    def test_automatic_authorisation_rechecks_on_timer_options_and_wallbox(self):
+    def test_automatic_authorisation_rechecks_on_timer_options_and_geely(self):
         """Monitor must refresh even if the vehicle doesn't change state."""
         tree = ast.parse((ROOT / "live_control.py").read_text(encoding="utf-8"))
         controller = next(node for node in tree.body
@@ -59,7 +59,8 @@ class DiscoveryStaticTests(unittest.TestCase):
         self.assertTrue(auto_tick_present(options_changed))
         source = ast.unparse(listening)
         self.assertIn("add_update_listener(options_changed)", source)
-        self.assertIn("binary_sensor.tesla_wall_connector_vehicle_connected", source)
+        self.assertIn("entities.append(self.plug)", source)
+        self.assertNotIn("tesla_wall_connector_vehicle_connected", source)
 
     def test_schedule_controls_instead_of_configure_menu(self):
         """Day settings belong in dashboard entities, not Configure."""
