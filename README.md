@@ -4,6 +4,12 @@ An early **experimental integration** for Home Assistant, designed for the **Gee
 
 **Safety (v0.3.0):** The proven manual start/stop test remains available. A separate automatic controller now offers **Off / Monitor / Active** modes. Off is the default after every restart. Monitor makes read-only authorisation decisions; Active can issue guarded home-only schedule starts and verified stops. **This is for attended testing, not yet an unattended overnight controller.** Never run alongside another active charging controller. Read [the automatic test checklist](docs/automatic-charging-test.md) before enabling Active.
 
+## Ready-by scheduling (v0.3.3)
+
+Each enabled weekday means the **day the vehicle must be ready**, not the day charging starts. A Tuesday 03:00 deadline may begin charging on Monday evening; a Wednesday 22:00 deadline may begin Wednesday afternoon. The planner uses battery state, an effective charging rate and a buffer to calculate the start time. All seven days are disabled by default.
+
+**Release limitation:** The current automatic controller still depends on the developer's Tesla Wall Connector for home-presence verification. This is a temporary supervised-test constraint and **not** a supported Geely-only automatic charging mode. Before unattended public release, replace this hardcoded requirement with a Geely-based core and an optional, explicitly configured home-presence method; do not infer home from the plug sensor. Manual charging tests use Geely controls, but remain attended and explicitly armed.
+
 ## HACS setup and updates (custom repository)
 
 1. In Home Assistant, open **HACS**, then its menu **Custom repositories**.
