@@ -1,7 +1,7 @@
 """Charging-linked comfort preferences for each ready-by weekday.
 
-These settings share the charging deadline, so there is no second clock.
-They affect dashboard and simulations only. No vehicle commands are sent.
+These settings share the charging deadline. The scheduled-climate controller
+uses them to send Geely cabin commands independently of charging power.
 """
 from .weekly_schedule import DAY_NAMES
 
