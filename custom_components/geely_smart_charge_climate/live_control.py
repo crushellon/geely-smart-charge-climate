@@ -180,18 +180,22 @@ class LiveChargeController:
         )
         if self.auto.mode != "Off":
             await self.auto.async_set_mode("Off")
-        async with self.auto._lock:
-            if self.public_mode():
-                self.auto._update(
-                    "BLOCKED",
-                    "Emergency stop latched, but Public Mode blocks vehicle commands",
-                )
-            elif self.auto.stop_requested_at is None:
-                await self.auto._request_stop("Emergency STOP requested")
+        # Exactly one controller may issue the emergency OFF command.
+        # The manual owner retains responsibility for manual stop verification;
+        # otherwise the automatic safety controller owns the emergency stop.
         if self.owned and not self.public_mode():
             async with self._lock:
                 if self.stop_requested_at is None:
                     await self._stop_locked("Emergency STOP requested")
+        else:
+            async with self.auto._lock:
+                if self.public_mode():
+                    self.auto._update(
+                        "BLOCKED",
+                        "Emergency stop latched, but Public Mode blocks vehicle commands",
+                    )
+                elif self.auto.stop_requested_at is None:
+                    await self.auto._request_stop("Emergency STOP requested")
         self._notify()
 
     async def async_release_emergency_stop(self):
