@@ -25,47 +25,27 @@ def schedule_card(day: str, entity_ids: dict[str, str]) -> dict:
 
 
 def comfort_cards(entity_ids: dict[str, str]) -> list[dict]:
-    """Comfort controls resembling the original EV Control Centre.
-
-    Temperature uses a slider, seats use named dropdowns, steering heat and
-    visibility use switches. Everything here edits preferences only.
-    """
+    """Display named Cool and Warm seat settings, without expand toggles."""
     result = [
-        {
-            "type": "markdown",
-            "content": "## Cabin comfort settings\\n"
-            "**Simulation-only preferences.** Nothing here starts the climate "
-            "system or changes your existing EV automations.",
-        },
+        {"type": "markdown",
+         "content": "## Comfort settings\n"
+         "**Simulation only.** These preferences do not command the vehicle."}
     ]
     for profile in ("cool", "warm"):
-        show = entity_ids[f"show_{profile}_settings"]
         result.append({
             "type": "entities",
-            "title": f"Comfort {profile.title()} — expand settings",
+            "title": f"{profile.title()} profile",
             "show_header_toggle": False,
             "entities": [
-                {"entity": show, "name": f"Show {profile.title()} settings"},
+                {"entity": entity_ids[f"{profile}_temperature"],
+                 "name": "Cabin temperature"},
+                {"entity": entity_ids[f"{profile}_driver_seat_mode"],
+                 "name": "Driver seat"},
+                {"entity": entity_ids[f"{profile}_passenger_seat_mode"],
+                 "name": "Passenger seat"},
+                {"entity": entity_ids[f"{profile}_steering_toggle"],
+                 "name": "Steering wheel heating"},
             ],
-        })
-        result.append({
-            "type": "conditional",
-            "conditions": [{"entity": show, "state": "on"}],
-            "card": {
-                "type": "entities",
-                "title": f"{profile.title()} profile",
-                "show_header_toggle": False,
-                "entities": [
-                    {"entity": entity_ids[f"{profile}_temperature"],
-                     "name": "Cabin temperature"},
-                    {"entity": entity_ids[f"{profile}_driver_seat_mode"],
-                     "name": "Driver seat"},
-                    {"entity": entity_ids[f"{profile}_passenger_seat_mode"],
-                     "name": "Passenger seat"},
-                    {"entity": entity_ids[f"{profile}_steering_toggle"],
-                     "name": "Steering wheel heating"},
-                ],
-            },
         })
     return result
 
@@ -109,6 +89,29 @@ def independent_climate_schedule_cards(entity_ids: dict[str, str]) -> list[dict]
         })
     return cards
 
+
+
+def charging_schedule_card(entity_ids: dict[str, str]) -> dict:
+    """One weekly schedule aligned to the night-before / ready-next-day model."""
+    rows = []
+    for index, day in enumerate(DAYS):
+        previous = DAYS[(index - 1) % 7].title()
+        rows.extend([
+            {"type": "section", "label": f"{previous} night → {day.title()}"},
+            {"entity": entity_ids[f"{day}_enabled"], "name": "Schedule enabled"},
+            {"entity": entity_ids[f"{day}_target"], "name": "Finish battery %"},
+            {"entity": entity_ids[f"{day}_ready_time"], "name": "Ready by (next morning)"},
+            {"entity": entity_ids[f"{day}_linked_comfort_enabled"],
+             "name": "Cabin comfort enabled"},
+            {"entity": entity_ids[f"{day}_linked_comfort_profile"],
+             "name": "Comfort profile (Cool / Warm)"},
+        ])
+    return {"type": "entities", "title": "Seven-day charging schedule",
+            "show_header_toggle": False, "entities": rows}
+
+
+def _section(cards: list[dict]) -> dict:
+    return {"type": "grid", "cards": cards}
 
 
 def dashboard_config(
@@ -207,36 +210,81 @@ def dashboard_config(
             }
         )
 
+    comfort_timing = {
+        "type": "entities",
+        "title": "Charging-linked cabin comfort timing",
+        "show_header_toggle": False,
+        "entities": [
+            {"entity": entity_ids["linked_comfort_lead_minutes"],
+             "name": "Start before ready-by"},
+            {"entity": entity_ids["linked_comfort_hold_minutes"],
+             "name": "Keep running after ready-by"},
+        ],
+    }
+    info = {"type": "markdown", "content":
+        "**Charging-linked comfort** uses the same ready-by time as charging. "
+        "Choose Cool/Warm on the charging schedule; its settings are on "
+        "Comfort Settings. **Simulation only.**"}
+    data_cards = [
+        {"type": "markdown", "content":
+         "## Geely EX5 — vehicle data\n"
+         "Telemetry and charging statistics only. Vehicle speed is omitted."},
+        {"type": "gauge", "entity": battery, "name": "Battery",
+         "min": 0, "max": 100,
+         "severity": {"red": 0, "yellow": 25, "green": 60}},
+        {"type": "entities", "title": "Connection and charging",
+         "show_header_toggle": False,
+         "entities": [battery] + ([plug] if plug else [])
+         + ([charging_power] if charging_power else []) + [status]},
+        *stats_cards,
+    ]
+    all_climate = independent_climate_schedule_cards(entity_ids)
     return {
-        "title": "EV Control Centre",
+        "title": "Geely EV Control Centre (Test)",
         "views": [
             {
-                "title": "Charging",
+                "title": "Charging & Schedule",
                 "path": "charging",
-                "icon": "mdi:ev-station",
-                "type": "masonry",
-                "cards": charging_cards,
+                "icon": "mdi:car-electric",
+                "type": "sections",
+                "max_columns": 2,
+                "sections": [
+                    _section(charging_cards),
+                    _section([charging_schedule_card(entity_ids), info]),
+                ],
             },
             {
-                "title": "Climate",
-                "path": "climate",
-                "icon": "mdi:car-defrost-front",
-                "type": "masonry",
-                "cards": comfort_cards(entity_ids) + independent_climate_schedule_cards(entity_ids),
+                "title": "Comfort Settings",
+                "path": "comfort",
+                "icon": "mdi:tune",
+                "type": "sections",
+                "max_columns": 2,
+                "sections": [
+                    _section([comfort_timing]),
+                    _section(comfort_cards(entity_ids)),
+                ],
             },
             {
-                "title": "Schedule",
-                "path": "schedule",
-                "icon": "mdi:calendar-clock",
-                "type": "masonry",
-                "cards": schedule_cards,
+                "title": "Climate Scheduler",
+                "path": "climate-scheduler",
+                "icon": "mdi:car-seat-heater",
+                "type": "sections",
+                "max_columns": 2,
+                "sections": [
+                    _section(all_climate[:2] + all_climate[2::2]),
+                    _section(all_climate[3::2]),
+                ],
             },
             {
-                "title": "Statistics",
-                "path": "statistics",
-                "icon": "mdi:chart-line",
-                "type": "masonry",
-                "cards": stats_cards,
+                "title": "Vehicle Data",
+                "path": "data",
+                "icon": "mdi:chart-box-outline",
+                "type": "sections",
+                "max_columns": 2,
+                "sections": [
+                    _section(data_cards[:4]),
+                    _section(data_cards[4:]),
+                ],
             },
         ],
     }
