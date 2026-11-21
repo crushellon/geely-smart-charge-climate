@@ -19,7 +19,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         + [ClimateSlotEnabled(hass, entry, slot, 'enabled') for slot in SLOTS]
         + [ClimateSlotEnabled(hass, entry, slot, 'steering_heat') for slot in SLOTS]
         + [ChargingLinkedComfortSwitch(hass, entry, day) for day in DAY_NAMES]
-        + [PublicChargingModeSwitch(hass, entry), AutomaticChargingEnabledSwitch(entry), EmergencyStopSwitch(hass, entry)]
+        + [PublicChargingModeSwitch(hass, entry), AutomaticChargingEnabledSwitch(entry), ScheduledClimateEnabledSwitch(hass, entry), EmergencyStopSwitch(hass, entry)]
     )
 
 
@@ -269,3 +269,38 @@ class EmergencyStopSwitch(SwitchEntity):
     async def async_turn_off(self, **kwargs):
         await self.entry.runtime_data.async_release_emergency_stop()
         self.async_write_ha_state()
+
+
+class ScheduledClimateEnabledSwitch(SwitchEntity):
+    """Production climate scheduling opt-in; no silent activation on migration.
+
+    Slots previously configured for simulation remain inert until this
+    persistent global switch is enabled intentionally.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Scheduled climate enabled"
+    _attr_icon = "mdi:calendar-clock"
+
+    def __init__(self, hass, entry):
+        self.hass = hass
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_scheduled_climate_enabled"
+
+    @property
+    def is_on(self):
+        return self.entry.options.get("scheduled_climate_enabled", False) is True
+
+    async def _set(self, state):
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            options={**self.entry.options, "scheduled_climate_enabled": bool(state)},
+        )
+        self.async_write_ha_state()
+        await self.entry.runtime_data.scheduled_climate.async_tick()
+
+    async def async_turn_on(self, **kwargs):
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self._set(False)
