@@ -8,9 +8,7 @@ from homeassistant.components.button import ButtonEntity
 
 async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities([
-        LiveTestButton(entry, "start"),
-        LiveTestButton(entry, "stop"),
-        *[ManualChargeButton(entry, action) for action in
+         *[ManualChargeButton(entry, action) for action in
           ("start", "stop", "quick80", "quick100", "resume")],
         EmergencyActionButton(entry, "stop"),
         EmergencyActionButton(entry, "release"),
