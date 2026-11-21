@@ -71,7 +71,9 @@ def independent_climate_schedule_cards(entity_ids: dict[str, str]) -> list[dict]
             "Seven independent, once-per-week schedule slots. They do not "
             "depend on charging or being plugged in. Multiple slots may "
             "share the same weekday. All slots start disabled.\n\n"
-            "**Simulation only:** no vehicle climate commands are sent.",
+            "**Live scheduling:** enabled slots command Geely cabin comfort at "
+            "their calculated start and turn it off after the configured hold. "
+            "A manual climate command takes priority.",
         },
         {
             "type": "entity",
