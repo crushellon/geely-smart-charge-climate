@@ -280,7 +280,7 @@ def dashboard_config(
     data_cards = [
         {"type": "markdown", "content":
          "## Geely EX5 — vehicle data\n"
-         "Telemetry and charging statistics only. Vehicle speed is omitted."},
+         "Telemetry, battery condition, charging and vehicle health."},
         {"type": "gauge", "entity": battery, "name": "Battery",
          "min": 0, "max": 100,
          "severity": {"red": 0, "yellow": 25, "green": 60}},
