@@ -15,7 +15,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_BATTERY_ENTITY, CONF_CHARGING_SWITCH, CONF_CHARGING_POWER
-from .discovery import discover_plug_entity
+from .discovery import discover_plug_entity, discover_charging_power_entity
 from .live_safety import (
     EMERGENCY_STOP, LEGACY_ACTIVE, LEGACY_CONTROLLER, OLD_FULL_CHARGE,
     PUBLIC_MODE, start_preflight, should_stop_owned_session,
@@ -36,7 +36,8 @@ class LiveChargeController:
         self.entry = entry
         self.battery = entry.data[CONF_BATTERY_ENTITY]
         self.charging_switch = entry.data[CONF_CHARGING_SWITCH]
-        self.charging_power = entry.data.get(CONF_CHARGING_POWER)
+        self.charging_power = (entry.data.get(CONF_CHARGING_POWER)
+                               or discover_charging_power_entity(hass, self.battery))
         self.plug = discover_plug_entity(hass, self.battery)
         self.armed = False  # Never persisted, auto-disarmed at HA startup.
         self.owned = False
