@@ -168,6 +168,32 @@ class AutomaticChargeController:
             manual_owned=self.manual.owned or self.manual.armed,
         )
 
+    @staticmethod
+    def _deadline_key(plan):
+        if plan is None or plan.ready_by is None:
+            return None
+        return (plan.day, plan.ready_by.date().isoformat())
+
+    def _rearm_if_requested(self, plan, deliberate=False):
+        """Release only the matching finished-session lock on fresh intent.
+
+        An unchanged target/time cannot continually restart an interrupted
+        charge. Raising target, re-enabling a disabled schedule, or deliberate
+        Resume/Active action can re-arm, but never when SoC is unknown or
+        already satisfies the new requested target.
+        """
+        key = self._deadline_key(plan)
+        previous = self.finished_deadlines.get(key)
+        soc = self._soc()
+        if (previous is None or plan.action not in ("START", "WAIT")
+                or soc is None or plan.target is None or soc >= plan.target):
+            return False
+        if (deliberate or plan.target > previous["target"]
+                or previous["outcome"] == "disabled"):
+            del self.finished_deadlines[key]
+            return True
+        return False
+
     async def async_set_mode(self, mode):
         if mode not in MODES:
             raise ValueError("Unsupported automatic controller mode")
@@ -183,10 +209,8 @@ class AutomaticChargeController:
                 # and an actual shortfall against its requested target.
                 plan = self._policy()
                 soc = self._soc()
-                if (plan.action == "START" and plan.ready_by is not None
-                        and soc is not None and soc < plan.target):
-                    key = (plan.day, plan.ready_by.date().isoformat())
-                    self.finished_deadlines.pop(key, None)
+                if soc is not None:
+                    self._rearm_if_requested(plan, deliberate=True)
             if self.owned and mode != "Active":
                 # Never stop a public charge, even on a mode change.
                 if self._public_mode():
@@ -208,37 +232,27 @@ class AutomaticChargeController:
         """Start only when Geely telemetry and user-operated guards permit."""
         if self.mode != "Active" or self.manual.armed or self.manual.owned:
             return
-        # One session per departure calendar day, even if the user edits
-        # the target or ready-by clock time after starting.
-        deadline_key = (plan.day, plan.ready_by.date().isoformat())
+        # One session per departure calendar day, even if its ready-by
+        # time changes while that session is owned.
+        deadline_key = self._deadline_key(plan)
+        self._rearm_if_requested(plan)
         previous = self.finished_deadlines.get(deadline_key)
         if previous is not None:
-            soc = self._soc()
-            higher_target = plan.target > previous["target"]
-            reenabled = previous["outcome"] == "disabled"
-            if ((higher_target or reenabled)
-                    and soc is not None and soc < plan.target):
-                # An increased battery target or re-enabling a disabled
-                # schedule is a deliberate new charging request.
-                self.finished_deadlines.pop(deadline_key, None)
+            if previous["outcome"] == "completed":
+                self._update(
+                    "COMPLETED",
+                    "Scheduled target already achieved for this departure; "
+                    "increase target to request more charging",
+                    plan,
+                )
             else:
-                outcome = previous["outcome"]
-                if outcome == "completed":
-                    self._update(
-                        "COMPLETED",
-                        "Previous scheduled target already reached; "
-                        "increase target to request more charging",
-                        plan,
-                    )
-                else:
-                    self._update(
-                        "PAUSED",
-                        "Previous charging session ended before target; "
-                        "use Off then Active to resume (test UI), or request "
-                        "a higher target",
-                        plan,
-                    )
-                return
+                self._update(
+                    "PAUSED",
+                    "Previous charge ended before target; deliberate resume "
+                    "is needed (Off then Active in test UI)",
+                    plan,
+                )
+            return
         if self._public_mode() or not self._legacy_clear():
             self._update("BLOCKED", "Cannot start: public mode or safety interlock")
             return
@@ -499,6 +513,9 @@ class AutomaticChargeController:
             if self.manual.armed or self.manual.owned:
                 self._update("BLOCKED", "Manual live charge takes priority", policy)
                 return
+            # Accept an increased target/reenabled schedule as a new request
+            # immediately, even when its estimated start time is in future.
+            self._rearm_if_requested(policy)
             if policy.action in ("BLOCKED", "UNKNOWN"):
                 self.unexpected_since = None
                 self._update(policy.action, policy.reason, policy)
