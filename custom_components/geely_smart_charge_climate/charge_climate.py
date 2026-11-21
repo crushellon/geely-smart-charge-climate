@@ -30,3 +30,24 @@ def set_value(options: dict, day: str, field: str, value):
     all_days = options.get(KEY, {})
     updated = {**all_days, day: {**all_days.get(day, {}), field: value}}
     return {**options, KEY: updated}
+
+
+TIMING_KEY = "charging_linked_timing"
+
+
+def get_timing(options: dict, field: str) -> int:
+    """Charging-linked cabin comfort starts before/ends after ready-by."""
+    if field not in ("lead_minutes", "hold_minutes"):
+        raise ValueError("Unsupported timing setting")
+    default = 10 if field == "lead_minutes" else 15
+    return options.get(TIMING_KEY, {}).get(field, default)
+
+
+def set_timing(options: dict, field: str, value) -> dict:
+    if field not in ("lead_minutes", "hold_minutes"):
+        raise ValueError("Unsupported timing field")
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or int(value) != value or not 0 <= value <= 120):
+        raise ValueError("Timing must be 0–120 whole minutes")
+    existing = options.get(TIMING_KEY, {})
+    return {**options, TIMING_KEY: {**existing, field: int(value)}}
