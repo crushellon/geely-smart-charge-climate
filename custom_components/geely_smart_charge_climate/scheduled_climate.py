@@ -78,7 +78,11 @@ class ScheduledClimateController:
                 self.entry.options.get("emergency_stop", False) is True
                 or self.manual._raw("input_boolean.ev_emergency_stop") == "on"
             )
-            candidates = [] if emergency else candidate_windows(now, self.entry.options)
+            enabled = self.entry.options.get("scheduled_climate_enabled", False) is True
+            candidates = (
+                candidate_windows(now, self.entry.options)
+                if enabled and not emergency else []
+            )
             if self.manual.public_mode():
                 candidates = [c for c in candidates if c["kind"] != "linked"]
             available = {c["key"]: c for c in candidates}
@@ -164,6 +168,11 @@ class ScheduledClimateController:
             if emergency:
                 self.status = "BLOCKED"
                 self.message = "Emergency interlock; climate schedules suppressed"
+                self.manual._notify()
+                return
+            if not enabled:
+                self.status = "DISABLED"
+                self.message = "Scheduled climate disabled; enable it to run saved slots"
                 self.manual._notify()
                 return
 
