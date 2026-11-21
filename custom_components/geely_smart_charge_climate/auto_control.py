@@ -13,13 +13,14 @@ import logging
 
 from homeassistant.components import persistent_notification
 from homeassistant.util import dt as dt_util
+from homeassistant.helpers import entity_registry as er
 
 from .authorization import decide
 from .live_safety import (
     LEGACY_CONTROLLER, LEGACY_ACTIVE, OLD_FULL_CHARGE,
     PUBLIC_MODE, EMERGENCY_STOP, start_preflight,
 )
-from .const import DEFAULT_EFFECTIVE_KW, DEFAULT_USABLE_CAPACITY_KWH
+from .const import DOMAIN, DEFAULT_EFFECTIVE_KW, DEFAULT_USABLE_CAPACITY_KWH
 
 _LOGGER = logging.getLogger(__name__)
 HOME_WALL_CONNECTOR = "binary_sensor.tesla_wall_connector_vehicle_connected"
@@ -129,6 +130,25 @@ class AutomaticChargeController:
         if changed:
             self.manual._notify()
 
+    def _effective_kw(self):
+        """Use the existing real charging-rate learner when available."""
+        try:
+            registry = er.async_get(self.hass)
+            entity_id = registry.async_get_entity_id(
+                "sensor", DOMAIN, f"{self.entry.entry_id}_simulation_decision"
+            )
+            state = self.hass.states.get(entity_id) if entity_id else None
+            value = (
+                float(state.attributes.get("assumed_effective_kw"))
+                if state and state.attributes.get("assumed_effective_kw") is not None
+                else DEFAULT_EFFECTIVE_KW
+            )
+            if isfinite(value) and 1 <= value <= 22:
+                return value
+        except (TypeError, ValueError, AttributeError):
+            pass
+        return DEFAULT_EFFECTIVE_KW
+
     def _policy(self):
         return decide(
             now=dt_util.now(),
@@ -136,7 +156,7 @@ class AutomaticChargeController:
             soc=self._soc(), charging=self._charging(),
             at_home=self._home(),
             plugged=self._raw(self.manual.plug) == "on" if self.manual.plug else None,
-            rate_kw=DEFAULT_EFFECTIVE_KW,
+            rate_kw=self._effective_kw(),
             capacity_kwh=DEFAULT_USABLE_CAPACITY_KWH,
             public_mode=self._raw(PUBLIC_MODE) == "on",
             emergency=self._raw(EMERGENCY_STOP) == "on",
