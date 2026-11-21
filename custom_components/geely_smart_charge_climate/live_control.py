@@ -13,7 +13,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_BATTERY_ENTITY, CONF_CHARGING_SWITCH
+from .const import CONF_BATTERY_ENTITY, CONF_CHARGING_SWITCH, CONF_CHARGING_POWER
 from .discovery import discover_plug_entity
 from .live_safety import (
     EMERGENCY_STOP, LEGACY_ACTIVE, LEGACY_CONTROLLER, OLD_FULL_CHARGE,
@@ -35,12 +35,18 @@ class LiveChargeController:
         self.entry = entry
         self.battery = entry.data[CONF_BATTERY_ENTITY]
         self.charging_switch = entry.data[CONF_CHARGING_SWITCH]
+        self.charging_power = entry.data.get(CONF_CHARGING_POWER)
         self.plug = discover_plug_entity(hass, self.battery)
         self.armed = False  # Never persisted, auto-disarmed at HA startup.
         self.owned = False
         self.target = 80  # Requested next manual test; not a scheduled target.
         self.active_target = None
         self.started_at = None
+        self.observed_active = False
+        self.stop_requested_at = None
+        self.stop_attempts = 0
+        self.stop_note = ""
+        self.off_observations = 0
         self.status = "DISARMED"
         self.message = "Manual live charging test is disarmed"
         self._lock = asyncio.Lock()
@@ -74,6 +80,15 @@ class LiveChargeController:
         guards = self._guards()
         # A deliberately missing legacy helper on a new HA installation is
         # harmless. An existing failed/unavailable helper blocks live testing.
+        power = self._raw(self.charging_power)
+        if self.charging_power:
+            try:
+                if float(power) > 0.25:
+                    return "Geely reports charging power already flowing"
+                if float(power) < 0:
+                    return "Charging power reading invalid"
+            except (ValueError, TypeError):
+                return "Charging power unavailable: refresh vehicle data"
         return start_preflight(
             armed=self.armed,
             battery=self._raw(self.battery),
@@ -85,6 +100,8 @@ class LiveChargeController:
 
     async def async_start_listening(self):
         entities = [self.battery, self.charging_switch, *MONITORED_GUARDS]
+        if self.charging_power:
+            entities.append(self.charging_power)
         if self.plug:
             entities.append(self.plug)
 
@@ -135,6 +152,10 @@ class LiveChargeController:
             self.owned = True
             self.active_target = self.target
             self.started_at = dt_util.utcnow()
+            self.observed_active = False
+            self.stop_requested_at = None
+            self.stop_attempts = 0
+            self.off_observations = 0
             self.status = "STARTING"
             self.message = f"Sending Geely charging start for target {self.active_target}%"
             self._notify()
@@ -159,12 +180,19 @@ class LiveChargeController:
             self._notify()
 
     async def _stop_locked(self, reason):
+        """Request stop and retain session ownership until confirmed.
+
+        Geely cloud acknowledgements are not proof that charging has stopped.
+        """
         if not self.owned:
             self.message = "No integration-owned charge session to stop"
             self._notify()
             return
-        self.status = "STOPPING"
-        self.message = reason
+        self.stop_note = reason
+        self.stop_requested_at = dt_util.utcnow()
+        self.stop_attempts += 1
+        self.status = "STOP_REQUESTED"
+        self.message = f"{reason}; checking Geely confirmation"
         self._notify()
         try:
             await self.hass.services.async_call(
@@ -175,16 +203,38 @@ class LiveChargeController:
         except Exception as exc:
             _LOGGER.exception("Failed to stop integration-owned charging test")
             self.status = "ERROR"
-            self.message = f"Stop service error: {type(exc).__name__}"
+            self.message = f"Stop service error: {type(exc).__name__}; verify in car"
             self._notify()
-            return  # Keep ownership so stop can be retried.
+            return  # Keep ownership and allow another explicit stop.
+
+    def _finish(self, status, message):
+        """Finish only after vehicle state indicates charging has stopped."""
         self.owned = False
         self.armed = False
         self.active_target = None
         self.started_at = None
-        self.status = "STOPPED"
-        self.message = reason
+        self.observed_active = False
+        self.stop_requested_at = None
+        self.stop_attempts = 0
+        self.off_observations = 0
+        self.status = status
+        self.message = message
         self._notify()
+
+    def _power_active(self):
+        if not self.charging_power:
+            return False
+        try:
+            return float(self._raw(self.charging_power)) > 0.25
+        except (TypeError, ValueError):
+            return False
+
+    def _stopped_state(self):
+        """Require positive switch OFF plus no known charging power."""
+        return (
+            self._raw(self.charging_switch) == "off"
+            and not self._power_active()
+        )
 
     async def async_stop(self):
         async with self._lock:
@@ -196,16 +246,33 @@ class LiveChargeController:
             if not self.owned:
                 return
             guards = self._guards()
-            if any(guards.get(key) not in (None, "off") for key in MONITORED_GUARDS):
-                # If public mode is enabled, do not issue a command that could
-                # affect public charging; disarm and require manual inspection.
-                if guards.get(PUBLIC_MODE) == "on":
-                    self.armed = False
-                    self.owned = False
-                    self.status = "BLOCKED"
-                    self.message = "Public charging mode enabled; live control released"
-                    self._notify()
+            if guards.get(PUBLIC_MODE) == "on":
+                # Avoid commanding a public charge if the car was relocated.
+                self._finish(
+                    "BLOCKED",
+                    "Public mode enabled; live test released. Check charge manually",
+                )
+                return
+
+            if self.stop_requested_at is not None:
+                self.off_observations = (
+                    self.off_observations + 1 if self._stopped_state() else 0
+                )
+                if self.off_observations >= 2:
+                    self._finish("STOPPED", f"{self.stop_note}; Geely reports stopped")
                     return
+                if (
+                    dt_util.utcnow() - self.stop_requested_at >= timedelta(seconds=30)
+                ):
+                    if self.stop_attempts < 3:
+                        await self._stop_locked("Retrying stop confirmation")
+                    else:
+                        self.status = "ERROR"
+                        self.message = "Stop unconfirmed after 3 attempts: verify in car"
+                        self._notify()
+                return
+
+            if any(guards.get(key) not in (None, "off") for key in MONITORED_GUARDS):
                 await self._stop_locked("Safety interlock activated")
                 return
 
@@ -222,19 +289,22 @@ class LiveChargeController:
                 )
                 return
 
-            # Only after an initial Geely response grace period can an observed
-            # switch OFF mean the car completed or ended the session.
-            if (
-                self.started_at
-                and dt_util.utcnow() - self.started_at >= timedelta(seconds=60)
-                and self._raw(self.charging_switch) == "off"
-            ):
-                self.owned = False
-                self.armed = False
-                self.active_target = None
-                self.status = "COMPLETED"
-                self.message = "Geely reports charging stopped"
-                self._notify()
+            if self._raw(self.charging_switch) == "on" or self._power_active():
+                self.observed_active = True
+                self.off_observations = 0
+            elif self.observed_active:
+                self.off_observations += 1
+
+            elapsed = (
+                dt_util.utcnow() - self.started_at
+                if self.started_at else timedelta(0)
+            )
+            if not self.observed_active and elapsed >= timedelta(minutes=3):
+                await self._stop_locked("Charge did not confirm after 3 minutes")
+                return
+            if self.observed_active and self.off_observations >= 2 and elapsed >= timedelta(seconds=60):
+                self._finish("COMPLETED", "Geely reports charging ended")
+                return
 
     async def async_shutdown(self):
         for unsub in self._unsubs:
