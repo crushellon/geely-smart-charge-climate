@@ -27,7 +27,7 @@ class SimulationTests(unittest.TestCase):
         self.assertEqual(simulate(**(self.args | kwargs)).action, action)
 
     def test_start_when_authorised(self):
-        self.check("START")
+        self.check("START", now=self.ready - timedelta(hours=2))
 
     def test_wait_before_window(self):
         self.check("WAIT", soc=79)
