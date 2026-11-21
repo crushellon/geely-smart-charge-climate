@@ -44,8 +44,6 @@ class AutomaticChargeController:
         self.status = "OFF"
         self.message = "Automatic controller is off"
         self.decision = None
-        if self.owned and self.owned_day and self.owned_deadline:
-            self.completed_deadlines.add((self.owned_day, self.owned_deadline.isoformat()))
         self.owned = False
         self.owned_target = None
         self.owned_day = None
@@ -258,6 +256,8 @@ class AutomaticChargeController:
             self._notice("error", "Automatic stop failed; verify charging directly")
 
     def _release(self, state, message):
+        if self.owned and self.owned_day and self.owned_deadline:
+            self.completed_deadlines.add((self.owned_day, self.owned_deadline.isoformat()))
         self.owned = False
         self.owned_target = None
         self.owned_day = None
