@@ -118,7 +118,8 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
     async def test_linked_charge_preconditioning_runs_even_when_not_actively_charging(self):
         clock["now"] = datetime(2026, 11, 23, 6, 55,
                                  tzinfo=ZoneInfo("Australia/Brisbane"))
-        o = {"automatic_charging_enabled": True, "weekly_schedule": {
+        o = {"scheduled_climate_enabled": True,
+             "automatic_charging_enabled": True, "weekly_schedule": {
             "monday": {"enabled": True, "target": 80, "ready_time": "07:00"},
         }}
         self.entry.options = linked.set_value(o, "monday", "enabled", True)
