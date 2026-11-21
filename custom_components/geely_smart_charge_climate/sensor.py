@@ -412,7 +412,9 @@ class AutomaticChargeStatusSensor(SensorEntity):
             "automatic_enabled_preference": self.entry.options.get(
                 "automatic_charging_enabled", False
             ) is True,
-            "climate_commands_enabled": True,
+            "climate_commands_enabled": self.entry.options.get(
+                "scheduled_climate_enabled", False
+            ) is True,
             "enabled_schedule_days": [
                 day for day, values in
                 self.entry.options.get("weekly_schedule", {}).items()
