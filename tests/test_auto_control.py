@@ -319,7 +319,7 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.auto.status, "STOPPED")
         self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
         # Move ready time further into future so rearm must not START yet.
-        self.entry.options["weekly_schedule"]["monday"]["ready_time"] = "08:00"
+        self.entry.options["weekly_schedule"]["monday"]["ready_time"] = "09:00"
         await self.auto.async_set_mode("Active")
         self.assertEqual(self.auto.status, "WAITING")
         self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
