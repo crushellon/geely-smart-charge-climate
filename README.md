@@ -1,36 +1,32 @@
-# Geely Smart Charge & Climate — development starter
+# Geely Smart Charge & Climate
 
-> **Development-only. DO NOT install into Home Assistant.** This repository is the first extraction of the charging-planning logic into Python. It does not contain a working custom integration, configuration flow, or charging commands.
+An early **read-only development integration** for Home Assistant, designed for the **Geely EX5** using community Geely Connect telemetry. Other Geely models have not been verified.
 
-## Compatibility statement (proposed)
+**Safety:** This version never sends charging, climate, charger, or vehicle commands. Your existing charging automations remain separate. The simulator only displays *hypothetical* decisions.
 
-Designed for and owner-tested on a Geely EX5 with the community Geely Connect integration. Other Geely models may work if the necessary entities are exposed; compatibility is unverified. This repository's Python port has **not yet been vehicle-tested**.
+## HACS setup and updates (custom repository)
 
-## Design decisions
+1. In Home Assistant, open **HACS**, then its menu **Custom repositories**.
+2. Add `https://github.com/crushellon/geely-smart-charge-climate` as category **Integration**.
+3. Open the Geely Smart Charge & Climate listing in HACS and select **Download**.
+4. Restart Home Assistant to load new Python code.
+5. In **Settings → Devices & Services**, use the existing Geely Smart Charge & Climate configuration if you already set it up; otherwise add it.
+6. Future published changes on the tracked branch can show as **Update** in HACS and Home Assistant's updates interface. **Restart Home Assistant after a Python integration update.**
 
-- Geely Connect: mandatory source of vehicle status and control. Check supported versions and entities during setup.
-- Smart wall charger: optional, used for independently corroborating connection and power when present.
-- Charging estimate: initially uses expected effective kW and usable battery kWh; learns percentage points/hour from sufficiently long, uninterrupted battery-percent gains.
-- 100%: **vehicle-managed termination**. Do not stop, restart, or interpret the natural stop as a failed charge merely because reported power falls to zero.
-- Below 100%: controller-managed completion, subject to verified state and safety checks.
-- Single authority for issuing charging commands; separate observation/simulation mode while migrating.
-- Never publish user-specific device IDs, mobile notification addresses, tokens or Home Assistant configuration files.
+Do **not** remove Geely Connect or your working EV automations when transitioning an existing manually installed copy to HACS management. Back up the existing custom component folder first.
 
-## Run first offline tests
+The initial tracked version must be installed from HACS once; copying ZIP files directly does not enroll a repository into HACS update tracking.
 
-```sh
-python -m unittest discover -s tests -v
-```
+## Configuration
 
-Only Python standard library required.
+The setup wizard suggests matching EX5 sensors, including battery state, charging switch, and optional charging power. It uses a standard 7 kW single-phase charger rating by default and calculates initial battery-side estimates internally. Charging-rate learning collects reliable SOC changes and saves recent samples.
 
-## What's included
+After adding the integration, use **Configure** to edit seven-day ready-by targets, one day at a time. **All days are disabled by default.** These entries affect simulation only and **do not trigger charging**.
 
-- `src/geely_smart_charge_climate/planner.py`: pure calculations; no integration or device commands.
-- `tests/test_planner.py`: test cases including vehicle-managed 100% and learned charging-rate fallback.
-- `docs/architecture.md`: future integration architecture, outstanding safety requirements and staged delivery plan.
-- `reference/README.md`: source reference policy; deliberately excludes private configuration.
+The integration exposes read-only `Observer status` and `Simulation decision` sensors. Any simulated `START`, `WAIT` or `STOP_AT_TARGET` value is a recommendation **only**, not proof that a command has been sent. A 100% target always uses vehicle-managed termination in the simulator.
 
-## Next milestone
+## Development status
 
-Build the Home Assistant config flow and **read-only** Geely adapter using entity selectors and strict capability checks. Add the session state machine and simulated charging-command tests *before* enabling any live charge commands. Maintain the original YAML installation untouched until a deliberate migration with rollback.
+This is an **EX5-focused pre-release** under active testing, not a finished charging controller. Check the [development documentation](docs/read-only-milestone.md) and [repository issues](https://github.com/crushellon/geely-smart-charge-climate/issues).
+
+Run offline checks using `python -m unittest discover -s tests -v`.
