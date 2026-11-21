@@ -20,11 +20,8 @@ from .const import (
 )
 from .rate_learning import RateLearner, effective_fallback_kw
 from .discovery import discover_plug_entity
-from .simulator import next_deadline, simulate
-
-# What-if demonstration inputs; NOT the user's active seven-day schedule.
-DEMO_TARGET = 80.0
-DEMO_READY_TIME = "06:30"
+from .simulator import simulate
+from .weekly_schedule import next_charge
 
 
 async def async_setup_entry(
@@ -128,7 +125,10 @@ class GeelySimulationSensor(GeelyObservedBase):
 
     def _result(self):
         now = dt_util.now()
-        ready = next_deadline(now, DEMO_READY_TIME)
+        plan = next_charge(now, self.entry.options.get("weekly_schedule", {}))
+        if plan is None:
+            return None
+        ready = plan.ready_by
         battery = self.hass.states.get(self._battery)
         charging = self.hass.states.get(self._switch)
         if battery is None or battery.state in ("unknown", "unavailable"):
@@ -150,7 +150,7 @@ class GeelySimulationSensor(GeelyObservedBase):
         )
         return simulate(
             now=now, ready_by=ready, soc=soc,
-            target=DEMO_TARGET, effective_kw=effective_kw,
+            target=plan.target, effective_kw=effective_kw,
             usable_kwh=DEFAULT_USABLE_CAPACITY_KWH,
             charging=bool(charging and charging.state == "on"),
             plugged=plugged,
@@ -159,29 +159,32 @@ class GeelySimulationSensor(GeelyObservedBase):
     @property
     def native_value(self) -> str:
         """Return the hypothetical outcome as an advisory state."""
-        return self._result().action
+        result = self._result()
+        return result.action if result is not None else "NO_SCHEDULE"
 
     @property
     def extra_state_attributes(self) -> dict:
         """Describe assumptions rather than pretending to control a session."""
+        plan = next_charge(dt_util.now(), self.entry.options.get("weekly_schedule", {}))
         result = self._result()
         return {
             "simulation_only": True,
             "vehicle_commands_sent": False,
-            "schedule_source": "illustrative example, not active schedule",
-            "example_target_percent": DEMO_TARGET,
-            "example_ready_time": DEMO_READY_TIME,
+            "schedule_source": "configured weekly schedule (simulation only)",
+            "next_schedule_day": plan.day if plan else None,
+            "target_percent": plan.target if plan else None,
+            "ready_time": plan.ready_by.strftime("%H:%M") if plan else None,
             "charger_rated_kw": self._rated_kw,
             "charge_rate_source": "learned" if self._learner.learned_rate is not None else "initial_estimate",
             "learned_percentage_points_per_hour": self._learner.learned_rate,
             "learning_sample_count": len(self._learner.samples),
             "assumed_effective_kw": (self._learner.learned_rate * DEFAULT_USABLE_CAPACITY_KWH / 100) if self._learner.learned_rate is not None else effective_fallback_kw(self._rated_kw),
             "assumed_usable_capacity_kwh": DEFAULT_USABLE_CAPACITY_KWH,
-            "estimated_minutes": result.remaining_minutes,
-            "estimated_start": result.start_at.isoformat() if result.start_at else None,
-            "ready_by": result.ready_by.isoformat(),
-            "termination_policy": result.termination,
-            "reason": result.reason,
+            "estimated_minutes": result.remaining_minutes if result else None,
+            "estimated_start": result.start_at.isoformat() if result and result.start_at else None,
+            "ready_by": result.ready_by.isoformat() if result else None,
+            "termination_policy": result.termination if result else None,
+            "reason": result.reason if result else "No schedule days enabled",
             "plug_status_configured": self._plug is not None,
             "plug_source": self._plug,
             "plug_state": (self.hass.states.get(self._plug).state if self._plug and self.hass.states.get(self._plug) else "unavailable"),
