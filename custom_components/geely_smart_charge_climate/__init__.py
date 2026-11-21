@@ -1,6 +1,6 @@
-"""Read-only Geely Smart Charge & Climate integration.
+"""Geely Smart Charge & Climate.
 
-No vehicle charging or climate commands are issued by this milestone.
+Passive schedules with an explicitly armed manual live-charging test.
 """
 import logging
 
@@ -23,7 +23,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Load diagnostic sensors and schedule controls, then add a dashboard."""
     entry.runtime_data = LiveChargeController(hass, entry)
     await entry.runtime_data.async_start_listening()
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except Exception:
+        await entry.runtime_data.async_shutdown()
+        raise
     try:
         await async_ensure_dashboard(hass, entry)
     except Exception:
@@ -32,6 +36,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload the read-only integration entities."""
+    """Stop an owned sub-100% test before unloading entity platforms."""
     await entry.runtime_data.async_shutdown()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
