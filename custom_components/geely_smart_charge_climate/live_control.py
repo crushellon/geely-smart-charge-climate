@@ -104,7 +104,8 @@ class LiveChargeController:
         )
 
     async def async_start_listening(self):
-        entities = [self.battery, self.charging_switch, *MONITORED_GUARDS]
+        entities = [self.battery, self.charging_switch, *MONITORED_GUARDS,
+                    "binary_sensor.tesla_wall_connector_vehicle_connected"]
         if self.charging_power:
             entities.append(self.charging_power)
         if self.plug:
@@ -118,7 +119,16 @@ class LiveChargeController:
         @callback
         def periodic(_now):
             self.hass.async_create_task(self.async_tick())
+            self.hass.async_create_task(self.auto.async_tick())
 
+        async def options_changed(_hass, _entry):
+            # A dashboard schedule change updates config-entry options
+            # without changing any vehicle entity state.
+            await self.auto.async_tick()
+
+        self._unsubs.append(
+            self.entry.add_update_listener(options_changed)
+        )
         self._unsubs.append(
             async_track_state_change_event(self.hass, entities, changed)
         )
