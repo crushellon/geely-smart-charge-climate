@@ -14,7 +14,6 @@ from .const import (
     DOMAIN,
 )
 from .discovery import suggested_entities, validate_sources
-from .weekly_schedule import DAY_NAMES, default_schedule, validate_day
 
 
 class GeelySmartChargeClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -75,61 +74,3 @@ class GeelySmartChargeClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
         )
         return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
 
-
-class GeelyScheduleOptionsFlow(config_entries.OptionsFlowWithReload):
-    """Edit one weekday at a time; preserve other days on each save."""
-
-    async def async_step_init(self, user_input=None):
-        """Show the seven-day schedule menu."""
-        return self.async_show_menu(step_id="init", menu_options=list(DAY_NAMES))
-
-    async def _edit_day(self, day: str, user_input=None):
-        """Edit and persist one day's passive simulation configuration."""
-        schedule = self.config_entry.options.get("weekly_schedule", {})
-        current = {**default_schedule()[day], **schedule.get(day, {})}
-        if user_input is not None:
-            try:
-                updated = validate_day(user_input)
-            except ValueError:
-                return self.async_show_form(
-                    step_id=day, data_schema=self._day_schema(current),
-                    errors={"base": "invalid_schedule"},
-                )
-            new_schedule = {**schedule, day: updated}
-            return self.async_create_entry(
-                data={**self.config_entry.options, "weekly_schedule": new_schedule}
-            )
-        return self.async_show_form(
-            step_id=day, data_schema=self._day_schema(current)
-        )
-
-    @staticmethod
-    def _day_schema(current):
-        return vol.Schema({
-            vol.Required("enabled", default=current["enabled"]): bool,
-            vol.Required("target", default=current["target"]): vol.All(
-                vol.Coerce(int), vol.Range(min=50, max=100)
-            ),
-            vol.Required("ready_time", default=current["ready_time"]): str,
-        })
-
-    async def async_step_monday(self, user_input=None):
-        return await self._edit_day("monday", user_input)
-
-    async def async_step_tuesday(self, user_input=None):
-        return await self._edit_day("tuesday", user_input)
-
-    async def async_step_wednesday(self, user_input=None):
-        return await self._edit_day("wednesday", user_input)
-
-    async def async_step_thursday(self, user_input=None):
-        return await self._edit_day("thursday", user_input)
-
-    async def async_step_friday(self, user_input=None):
-        return await self._edit_day("friday", user_input)
-
-    async def async_step_saturday(self, user_input=None):
-        return await self._edit_day("saturday", user_input)
-
-    async def async_step_sunday(self, user_input=None):
-        return await self._edit_day("sunday", user_input)
