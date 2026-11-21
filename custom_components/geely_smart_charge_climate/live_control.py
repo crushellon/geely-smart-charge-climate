@@ -19,6 +19,7 @@ from .discovery import discover_plug_entity, discover_charging_power_entity
 from .auto_control import AutomaticChargeController
 from .manual_climate import ManualClimateController
 from .scheduled_climate import ScheduledClimateController
+from .vehicle_activity import vehicle_activity
 from .live_safety import (
     EMERGENCY_STOP, LEGACY_ACTIVE, LEGACY_CONTROLLER, OLD_FULL_CHARGE,
     PUBLIC_MODE, start_preflight, should_stop_owned_session,
@@ -44,9 +45,23 @@ class LiveChargeController:
         self.charging_power = (entry.data.get(CONF_CHARGING_POWER)
                                or discover_charging_power_entity(hass, self.battery))
         self.plug = discover_plug_entity(hass, self.battery)
-        self.armed = False  # Never persisted, auto-disarmed at HA startup.
+        # Optional read-only wallbox power can expose a charging session
+        # before Geely's cloud data catches up. No Tesla services are called.
+        self.wallbox_power = "sensor.tesla_wall_connector_total_power"
+        # Manual charging is a normal user action, not a staged armed test.
+        # 'armed' only remains for compatibility with existing pure policy.
+        self.armed = False
         self.owned = False
-        self.target = 80  # Requested next manual test; not a scheduled target.
+        saved_target = entry.options.get("manual_charge_target", 80)
+        self.target = (int(saved_target)
+                       if isinstance(saved_target, (int, float))
+                       and not isinstance(saved_target, bool)
+                       and 50 <= saved_target <= 100 else 80)
+        self.unmanaged_charge = False
+        self._unmanaged_stop_observations = 0
+        # Cloud states may arrive after integration setup. Do not claim an
+        # existing charge is unauthorised before restart telemetry settles.
+        self._startup_observation_until = None
         self.active_target = None
         self.started_at = None
         self._manual_recovery_started = None
@@ -57,8 +72,8 @@ class LiveChargeController:
         self.stop_attempts = 0
         self.stop_note = ""
         self.off_observations = 0
-        self.status = "DISARMED"
-        self.message = "Manual live charging test is disarmed"
+        self.status = "IDLE"
+        self.message = "Manual charging ready"
         self._lock = asyncio.Lock()
         self._callbacks = []
         self._unsubs = []
@@ -90,6 +105,63 @@ class LiveChargeController:
     def _guards(self):
         return {key: self._raw(key) for key in MONITORED_GUARDS}
 
+    def _wallbox_kw(self):
+        """Optional power confirmation. No wallbox API calls are ever issued."""
+        try:
+            value = float(self._raw(self.wallbox_power))
+            return value if isfinite(value) and value >= 0 else None
+        except (ValueError, TypeError):
+            return None
+
+    def vehicle_activity(self):
+        """Best read-only power indication; Tesla is optional, never a command."""
+        activity, power = vehicle_activity(
+            self._raw(self.charging_switch), self._raw(self.charging_power)
+        )
+        if activity != "CHARGING":
+            wall_power = self._wallbox_kw()
+            if wall_power is not None and wall_power > 0.25:
+                return "CHARGING", wall_power
+        return activity, power
+
+    def _vehicle_indicates_charging(self):
+        return self.vehicle_activity()[0] in ("CHARGING", "CHARGING_REPORTED")
+
+    def _observe_unmanaged(self):
+        """Keep a pre-existing/unattributed charge outside controller control."""
+        if self.owned or self.auto.owned or self.public_mode():
+            return
+        activity, _ = self.vehicle_activity()
+        if self.unmanaged_charge:
+            if activity == "STOPPED":
+                self._unmanaged_stop_observations += 1
+                if self._unmanaged_stop_observations >= 2:
+                    self.unmanaged_charge = False
+                    self._unmanaged_stop_observations = 0
+                    if self.status in ("EXTERNAL", "STOP_REQUESTED"):
+                        self.status = "IDLE"
+                        self.message = "Previous charge has stopped"
+                    self._notify()
+                    if hasattr(self.hass, "async_create_task"):
+                        self.hass.async_create_task(
+                            self.async_reconcile_automatic()
+                        )
+            else:
+                self._unmanaged_stop_observations = 0
+        elif (self.auto.stop_requested_at is None
+              and self.auto.stop_watch_until is None
+              and activity in ("CHARGING", "CHARGING_REPORTED")):
+            # Charging may have started through Geely, a prior HA version or
+            # another user action. Origin cannot be proven from cloud states.
+            # The product must not claim a manual target or command STOP.
+            self.unmanaged_charge = True
+            self.status = "EXTERNAL"
+            self.message = (
+                "Vehicle charging observed; controller ownership unknown"
+            )
+            self._notify()
+
+
     def public_mode(self):
         """Persistent integration switch or existing legacy helper is ON."""
         return (
@@ -116,7 +188,7 @@ class LiveChargeController:
             except (ValueError, TypeError):
                 return "Charging power unavailable: refresh vehicle data"
         return start_preflight(
-            armed=self.armed,
+            armed=True,
             battery=self._raw(self.battery),
             plugged=self._raw(self.plug),
             charging=self._raw(self.charging_switch),
@@ -146,7 +218,9 @@ class LiveChargeController:
     async def async_reconcile_automatic(self, deliberate=False):
         """After manual, emergency, public or restart restore user's intent."""
         wanted = self.entry.options.get("automatic_charging_enabled", False) is True
-        blocked = (self.owned or self.armed or self.stop_requested_at is not None
+        blocked = (self.owned or self.stop_requested_at is not None
+                   or self.auto.stop_requested_at is not None
+                   or self.unmanaged_charge
                    or self.public_mode()
                    or self.entry.options.get("emergency_stop", False) is True)
         target_mode = "Active" if wanted and not blocked else "Off"
@@ -157,7 +231,14 @@ class LiveChargeController:
         self._notify()
 
     async def async_restore(self):
-        """Reacquire manual observation without ever issuing a duplicate ON."""
+        """Observe on startup, restore known manual charge and protect unknowns.
+
+        Pre-v0.3.11 did not persist manual-session ownership. Never claim
+        that a visible pre-existing charge was started by this integration.
+        """
+        self._startup_observation_until = (
+            dt_util.utcnow() + timedelta(seconds=120)
+        )
         saved = self.entry.options.get("manual_session", {})
         if isinstance(saved, dict) and saved.get("active") is True:
             target = saved.get("target")
@@ -171,10 +252,20 @@ class LiveChargeController:
                     self.started_at = dt_util.utcnow()
                 self.observed_active = False
                 self._manual_recovery_started = dt_util.utcnow()
-                self.status = "RECOVERING"
-                self.message = "Recovering manual charge; no duplicate START"
+                if saved.get("stop_pending") is True:
+                    # An explicit STOP was already requested before reload.
+                    # Keep ownership and resume confirmation/retries.
+                    self.stop_requested_at = dt_util.utcnow()
+                    self.stop_started_at = dt_util.utcnow()
+                    self.stop_note = "Restoring previous manual STOP request"
+                    self.status = "STOP_REQUESTED"
+                    self.message = "Confirming prior manual stop after reload"
+                else:
+                    self.status = "RECOVERING"
+                    self.message = "Recovering manual charge; no duplicate START"
                 self._notify()
         await self.auto.async_restore()
+        self._observe_unmanaged()
         await self.async_reconcile_automatic()
         await self.scheduled_climate.async_tick()
 
@@ -184,15 +275,19 @@ class LiveChargeController:
             entities.append(self.charging_power)
         if self.plug:
             entities.append(self.plug)
+        if self.hass.states.get(self.wallbox_power) is not None:
+            entities.append(self.wallbox_power)
 
         @callback
         def changed(_event):
+            self._observe_unmanaged()
             self.hass.async_create_task(self.async_tick())
             self.hass.async_create_task(self.auto.async_tick())
             self.hass.async_create_task(self.scheduled_climate.async_tick())
 
         @callback
         def periodic(_now):
+            self._observe_unmanaged()
             self.hass.async_create_task(self.async_tick())
             self.hass.async_create_task(self.auto.async_tick())
             self.hass.async_create_task(self.scheduled_climate.async_tick())
@@ -213,20 +308,15 @@ class LiveChargeController:
         )
 
     async def async_arm(self, enabled):
-        async with self._lock:
-            if not enabled and self.owned:
-                await self._stop_locked("User disarmed live test")
-            self.armed = bool(enabled)
-            if not self.owned:
-                self.status = "ARMED" if enabled else "DISARMED"
-                self.message = ("Press Start test to issue a manual charge request"
-                                if enabled else "Live test is disarmed")
-            self._notify()
+        """Legacy HA helper method; no arming or test entity is exposed."""
+        self.armed = bool(enabled)
+        self._notify()
 
     async def async_set_target(self, value):
         if isinstance(value, bool) or int(value) != value or not 50 <= value <= 100:
-            raise ValueError("Manual test target must be 50–100%")
+            raise ValueError("Manual charging target must be 50–100%")
         self.target = int(value)
+        self._save_options(manual_charge_target=self.target)
         self._notify()
 
     async def async_emergency_stop(self):
@@ -276,14 +366,20 @@ class LiveChargeController:
             self.message = "Stop the active schedule and verify OFF before manual charging"
             self._notify()
             return
+        if self.unmanaged_charge or self._vehicle_indicates_charging():
+            self.status = "BLOCKED"
+            self.message = (
+                "Vehicle is already charging; Stop manual or stop in Geely "
+                "before starting a new charge"
+            )
+            self._notify()
+            return
         if self.auto.mode != "Off":
             await self.auto.async_set_mode("Off")
         if target is not None:
             await self.async_set_target(target)
-        await self.async_arm(True)
         await self.async_start()
         if not self.owned:
-            self.armed = False
             await self.async_reconcile_automatic()
             self._notify()
 
@@ -304,8 +400,9 @@ class LiveChargeController:
             self.message = "Stop manual charging and wait for verification first"
             self._notify()
             return
-        self.armed = False
         await self.async_set_automatic_enabled(True)
+        if self.auto.mode == "Active":
+            await self.auto.async_request_resume()
         self._notify()
 
     async def async_start(self):
@@ -316,7 +413,7 @@ class LiveChargeController:
                 self._notify()
                 return
             if self.owned:
-                self.message = "Already managing a live test session"
+                self.message = "Manual charging already active"
                 self._notify()
                 return
             reason = self.preflight()
@@ -342,6 +439,7 @@ class LiveChargeController:
                 self.auto.stop_watch_until = None
                 self.auto.unexpected_since = None
                 self.owned = True
+                self.unmanaged_charge = False
             self.stop_watch_until = None
             self.active_target = self.target
             self.started_at = dt_util.utcnow()
@@ -363,7 +461,7 @@ class LiveChargeController:
                     blocking=True,
                 )
             except Exception as exc:
-                _LOGGER.exception("Geely live test start failed")
+                _LOGGER.exception("Geely manual charge start failed")
                 # The request may have reached the vehicle before HA errored.
                 await self._stop_locked("Start failed; attempted safe stop")
                 self.status = "ERROR"
@@ -371,9 +469,9 @@ class LiveChargeController:
                 self._notify()
                 return
             self.status = "RUNNING"
-            self.message = (f"Live manual test active, {self.active_target}% target"
+            self.message = (f"Manual charge active, {self.active_target}% target"
                             if self.active_target < 100
-                            else "Live 100% test: Geely controls termination")
+                            else "Manual full charge: Geely controls termination")
             self._notify()
 
     async def _stop_locked(self, reason):
@@ -394,6 +492,12 @@ class LiveChargeController:
             self.stop_note = reason
         self.stop_requested_at = dt_util.utcnow()
         self.stop_attempts += 1
+        self._save_options(manual_session={
+            "active": True,
+            "target": self.active_target,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "stop_pending": True,
+        })
         self.status = "STOP_REQUESTED"
         self.message = f"{reason}; checking Geely confirmation"
         self._notify()
@@ -404,7 +508,7 @@ class LiveChargeController:
                 blocking=True,
             )
         except Exception as exc:
-            _LOGGER.exception("Failed to stop integration-owned charging test")
+            _LOGGER.exception("Failed to stop integration-owned manual charging")
             self.status = "ERROR"
             self.message = f"Stop service error: {type(exc).__name__}; verify in car"
             self._notify()
@@ -454,6 +558,11 @@ class LiveChargeController:
                 return False
         if self._raw(self.charging_switch) != "off":
             return False
+        wallbox = self._wallbox_kw()
+        if wallbox is not None and wallbox > 0.25:
+            # Geely cloud may report OFF/0 before real wallbox power ceases.
+            # Optional wallbox data can prevent a FALSE verified STOP.
+            return False
         if not self.charging_power:
             return True
         try:
@@ -463,11 +572,39 @@ class LiveChargeController:
             return False  # Unknown power is not positive stop confirmation.
 
     async def async_stop(self):
-        async with self._lock:
-            await self._stop_locked("User requested manual stop")
+        """Explicit manual STOP also works for an observed older-version charge.
+
+        The user's request to Stop manual is a real vehicle command, not a
+        requirement that the current process previously issued START.
+        """
+        if self.owned:
+            async with self._lock:
+                await self._stop_locked("User requested manual stop")
+            return
+        if self.public_mode():
+            self.status = "BLOCKED"
+            self.message = "Public charging mode: use Geely to stop public charging"
+            self._notify()
+            return
+        if self._vehicle_indicates_charging() or self.unmanaged_charge:
+            # Use the automatic safety controller's already hardened STOP
+            # verification path, without claiming manual ownership.
+            async with self.auto._lock:
+                if self.auto.stop_requested_at is None:
+                    await self.auto._request_stop(
+                        "Explicit Stop manual for observed charging"
+                    )
+            self.status = "STOP_REQUESTED"
+            self.message = "Stopping observed charge; waiting for Geely verification"
+            self._notify()
+            return
+        self.status = "IDLE"
+        self.message = "No charge detected to stop"
+        self._notify()
 
     async def async_tick(self):
-        """Watch an owned session; never schedule an unattended start."""
+        """Observe manual ownership and verify stops; never blind-start."""
+        self._observe_unmanaged()
         async with self._lock:
             if self.public_mode():
                 self.stop_watch_until = None
@@ -590,9 +727,7 @@ class LiveChargeController:
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
-        if (self.owned and self.active_target is not None
-                and self.active_target < 100 and not self.public_mode()):
-            async with self._lock:
-                await self._stop_locked("Integration unloading: stop owned test")
-        self.armed = False
+        # Reload/restart is NOT a user request to stop a real charging
+        # session. Owner and explicit pending-stop markers are persisted.
+        # On next setup, recovery will observe Geely before issuing commands.
         self._notify()

@@ -148,6 +148,21 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.manual.stop_watch_until)
         self.assertEqual(self.services.calls, ["turn_on"])
 
+    async def test_optional_wallbox_power_prevents_false_automatic_stop(self):
+        self.manual._wallbox_kw = lambda: 0.0
+        await self.auto.async_set_mode("Active")
+        # The wallbox is now flowing, and may lag the Geely OFF response.
+        self.manual._wallbox_kw = lambda: 6.89
+        self.values["sensor.battery"] = "80"
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.manual._wallbox_kw = lambda: 0.0
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+
     async def test_immediate_off_does_not_verify_before_settling(self):
         # Reproduces START -> Off within moments, when cloud feedback is not
         # trustworthy enough to declare a verified physical stop.
@@ -504,6 +519,21 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.services.calls, ["turn_on", "turn_on"])
         self.assertEqual(self.auto.owned_target, 80)
 
+    async def test_finished_product_resume_rearms_while_auto_already_enabled(self):
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_tick()
+        self.values["switch.car"] = "off"
+        self.values["sensor.power"] = "0"
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "INTERRUPTED")
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "PAUSED")
+        # No developer Off/Active toggle: production button invokes this.
+        await self.auto.async_request_resume()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_on"])
+        self.assertTrue(self.auto.owned)
+
     async def test_stopped_below_new_100_target_can_start_again(self):
         # Recreate user journey: reach 79%, stop; update departure to 100%.
         self.entry.options["weekly_schedule"]["monday"]["target"] = 79
@@ -620,20 +650,20 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
         self.assertIsNotNone(self.auto.stop_requested_at)
 
-    async def test_guard_detects_and_stops_unexpected_geely_charge(self):
+    async def test_existing_charge_without_owner_is_not_stopped_by_schedule(self):
+        # The car may already be charging from Geely/manual before an update.
+        # The finished product cannot treat the absence of a saved owner as
+        # evidence that its own START was unauthorised.
         self.entry.options["weekly_schedule"] = {}
         self.values["switch.car"] = "on"
         self.values["sensor.power"] = "6"
         await self.auto.async_set_mode("Active")
-        self.assertEqual(self.auto.status, "CHECKING")
+        self.assertEqual(self.auto.status, "EXTERNAL")
         self.assertEqual(self.services.calls, [])
-        self.auto.unexpected_since = datetime.now(timezone.utc) - timedelta(seconds=40)
-        await self.auto.async_tick()
-        self.assertEqual(self.services.calls, ["turn_off"])
         await self.auto.async_tick()
         await self.auto.async_tick()
-        self.assertEqual(self.auto.status, "STOPPED")
-        self.assertIn("Unauthorised", self.auto.message)
+        self.assertEqual(self.services.calls, [])
+        self.assertIn("origin unknown", self.auto.message)
 
     async def test_geely_only_works_without_charging_power_entity(self):
         self.manual.charging_power = None

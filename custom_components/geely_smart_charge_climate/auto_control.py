@@ -42,9 +42,9 @@ class AutomaticChargeController:
         self.manual = manual
         self.hass = manual.hass
         self.entry = manual.entry
-        self.mode = "Off"  # Volatile until restart and intentionally fail-closed.
+        self.mode = "Off"  # Runtime policy, derived from persisted user preference.
         self.status = "OFF"
-        self.message = "Automatic controller is off"
+        self.message = "Automatic schedule disabled"
         self.decision = None
         self.owned = False
         self.owned_target = None
@@ -104,7 +104,10 @@ class AutomaticChargeController:
     def _charging(self):
         state = self._raw(self.manual.charging_switch)
         power = self._power()
-        return state == "on" or (power is not None and power > 0.25)
+        wallbox = (self.manual._wallbox_kw()
+                   if hasattr(self.manual, "_wallbox_kw") else None)
+        return (state == "on" or (power is not None and power > 0.25)
+                or (wallbox is not None and wallbox > 0.25))
 
     def _stop_telemetry_fresh(self):
         """Never verify STOP using cached states from before the command.
@@ -131,12 +134,15 @@ class AutomaticChargeController:
 
     def _stopped(self):
         power = self._power()
-        # Require positive post-command Geely reports. The Geely switch is
-        # mandatory; power is optional, but corroborates when configured.
+        wallbox = (self.manual._wallbox_kw()
+                   if hasattr(self.manual, "_wallbox_kw") else None)
+        # Geely OFF/0 is not physical proof when an optional wallbox still
+        # reports charging. This is corroboration only, not a requirement.
         return (
             self._stop_telemetry_fresh()
             and self._raw(self.manual.charging_switch) == "off"
             and (power is None or power <= 0.25)
+            and (wallbox is None or wallbox <= 0.25)
         )
 
     def _legacy_clear(self):
@@ -238,7 +244,8 @@ class AutomaticChargeController:
         """Persist current vehicle ownership without saving transient mode."""
         session = (
             {"active": True, "target": self.owned_target,
-             "day": self.owned_day, "deadline": self.owned_deadline.isoformat()}
+             "day": self.owned_day, "deadline": self.owned_deadline.isoformat(),
+             "stop_pending": self.stop_requested_at is not None}
             if active and self.owned_deadline else {"active": False}
         )
         if hasattr(self.manual, "_save_options"):
@@ -282,10 +289,31 @@ class AutomaticChargeController:
         self.owned_day = day
         self.owned_deadline = deadline
         self.started_at = dt_util.utcnow()
-        self._recovery_started_at = dt_util.utcnow()
+        if saved.get("stop_pending") is True:
+            # Persisted explicit STOP survives reload. Never send START.
+            self.stop_requested_at = dt_util.utcnow()
+            self.stop_started_at = dt_util.utcnow()
+            self.stop_context = "Restored pending automatic STOP"
+            self._recovery_started_at = None
+        else:
+            self._recovery_started_at = dt_util.utcnow()
         self.saw_charging = False
         self.off_checks = 0
-        self._update("RECOVERING", "Previous scheduled charge restored; checking Geely")
+        if self.stop_requested_at is not None:
+            self._update("STOP_REQUESTED", "Verifying previous automatic STOP after reload")
+        else:
+            self._update("RECOVERING", "Previous scheduled charge restored; checking Geely")
+
+    async def async_request_resume(self):
+        """Real Resume schedule action, even if already persistently enabled."""
+        async with self._lock:
+            if (self.mode != "Active" or self.owned
+                    or self.stop_requested_at is not None
+                    or getattr(self.manual, "unmanaged_charge", False)
+                    or self.manual.owned):
+                return
+            self._rearm_if_requested(self._policy(), deliberate=True)
+        await self.async_tick()
 
     async def async_set_mode(self, mode, deliberate=True):
         if mode not in MODES:
@@ -347,8 +375,8 @@ class AutomaticChargeController:
             else:
                 self._update(
                     "PAUSED",
-                    "Previous charge ended before target; deliberate resume "
-                    "is needed (Off then Active in test UI)",
+                    "Previous charge ended before target; use Resume schedule "
+                    "when vehicle is safe to charge again",
                     plan,
                 )
             return
@@ -418,6 +446,8 @@ class AutomaticChargeController:
         self.stop_requested_at = dt_util.utcnow()
         self.stop_attempts += 1
         self.off_checks = 0
+        if self.owned:
+            self._persist_session(True)
         self._update("STOP_REQUESTED", f"{self.stop_context}; awaiting Geely confirmation")
         self._notice("stop_requested", f"Geely charging STOP requested: {reason}")
         try:
@@ -706,7 +736,25 @@ class AutomaticChargeController:
                     self._update("BLOCKED", "Emergency stop active; starts suppressed")
                 return
 
-            # Never command while a manual test is armed or owns the vehicle.
+            # Charging that this integration did not start or restore is
+            # outside its authority. Geely can be charging manually across
+            # an integration update. Never issue an unsolicited OFF just
+            # because a weekly schedule says WAIT or STOP; the existing
+            # verified-stop rebound watchdog above still owns its cancellations.
+            if (not self.manual.owned and self.stop_watch_until is None
+                    and (getattr(self.manual, "unmanaged_charge", False)
+                         or self._charging())):
+                if hasattr(self.manual, "unmanaged_charge"):
+                    self.manual.unmanaged_charge = True
+                self.unexpected_since = None
+                self._update(
+                    "EXTERNAL",
+                    "Vehicle charging observed; session origin unknown. "
+                    "Automatic schedule is waiting without commanding vehicle",
+                )
+                return
+
+            # The normal manual control takes priority over the schedule.
             policy = self._policy()
             # The visible decision must refresh even if the status text stays
             # unchanged (for example, a target edit during WAIT/CHARGING).
@@ -773,18 +821,12 @@ class AutomaticChargeController:
             self._update("WAITING", f"{policy.action}: {policy.reason}", policy)
 
     async def async_shutdown(self):
-        """Unload safely. No unattended charge control survives restart."""
-        if self.owned or self.stop_requested_at is not None:
-            async with self._lock:
-                if self._public_mode():
-                    self._release("BLOCKED", "Public mode enabled during unload")
-                elif self.owned and self.owned_target == 100:
-                    # A Home Assistant reload is not a user request to cancel
-                    # 100% charging. Let Geely finish the session itself.
-                    self._release(
-                        "OFF", "Home Assistant unloaded; 100% termination left to Geely"
-                    )
-                elif self._charging():
-                    await self._request_stop("Integration unloading")
+        """Integration reload is never a user-requested vehicle STOP.
+
+        Persisted session ownership and pending-stop state are resumed on
+        setup. Do not clear 100% full-charge balancing or sub-100% charging.
+        """
+        if self.owned:
+            self._persist_session(True)
         self.mode = "Off"
         self.manual._notify()

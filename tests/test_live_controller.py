@@ -20,11 +20,19 @@ safety = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = safety
 spec.loader.exec_module(safety)
 
+activity_spec = importlib.util.spec_from_file_location(
+    "geely_vehicle_activity_test", ROOT / "vehicle_activity.py"
+)
+activity = importlib.util.module_from_spec(activity_spec)
+sys.modules[activity_spec.name] = activity
+activity_spec.loader.exec_module(activity)
+
 tree = ast.parse((ROOT / "live_control.py").read_text(encoding="utf-8"))
 body = next(node for node in tree.body
             if isinstance(node, ast.ClassDef) and node.name == "LiveChargeController")
 class DummyAutomatic:
     def __init__(self, manual):
+        self.manual = manual
         self.owned = False
         self.stop_requested_at = None
         self.mode = "Off"
@@ -35,8 +43,15 @@ class DummyAutomatic:
     async def async_set_mode(self, mode, deliberate=True):
         self.mode = mode
 
-    async def _request_stop(self, message):
+    async def async_request_resume(self):
         return None
+
+    async def _request_stop(self, message):
+        self.stop_requested_at = datetime.now(timezone.utc)
+        await self.manual.hass.services.async_call(
+            "switch", "turn_off",
+            {"entity_id": self.manual.charging_switch}, blocking=True,
+        )
 
     def _update(self, status, message):
         return None
@@ -77,6 +92,7 @@ env = {
     "AutomaticChargeController": DummyAutomatic,
     "ManualClimateController": DummyClimate,
     "ScheduledClimateController": DummyScheduledClimate,
+    "vehicle_activity": activity.vehicle_activity,
     "MANUAL_STOP_SETTLE": timedelta(0),
     "MANUAL_STOP_WATCH": timedelta(minutes=5),
     "datetime": datetime,
@@ -159,7 +175,7 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
     async def test_no_automatic_commands_when_disarmed(self):
         await self.controller.async_tick()
         self.assertEqual(self.services.calls, [])
-        self.assertEqual(self.controller.status, "DISARMED")
+        self.assertEqual(self.controller.status, "IDLE")
 
     async def test_old_controller_blocks_start_even_if_armed(self):
         self.states.data[safety.LEGACY_CONTROLLER].state = "on"
@@ -199,12 +215,68 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.controller.async_stop()
         self.assertEqual(self.services.calls[-1][1], "turn_off")
 
-    async def test_manual_disarm_stops_owned_session(self):
-        await self.controller.async_arm(True)
-        await self.controller.async_start()
+    async def test_old_arm_flag_is_not_a_vehicle_stop_control(self):
+        # There is no normal arm-test button; changing this legacy in-memory
+        # flag must not stop a real vehicle session.
+        await self.controller.async_start_manual()
         await self.controller.async_arm(False)
-        self.assertEqual(self.services.calls[-1][1], "turn_off")
-        self.assertFalse(self.controller.armed)
+        self.assertEqual([c[1] for c in self.services.calls], ["turn_on"])
+        self.assertTrue(self.controller.owned)
+
+    async def test_new_manual_target_is_saved_across_controller_instances(self):
+        await self.controller.async_set_target(87)
+        self.assertEqual(self.controller.entry.options["manual_charge_target"], 87)
+        rebuilt = LiveChargeController(self.controller.hass, self.controller.entry)
+        self.assertEqual(rebuilt.target, 87)
+
+    async def test_preexisting_charge_is_detected_without_claiming_manual_target(self):
+        self.states.data["switch.car"].state = "on"
+        self.states.data["sensor.power"].state = "6.5"
+        await self.controller.async_restore()
+        self.assertTrue(self.controller.unmanaged_charge)
+        self.assertFalse(self.controller.owned)
+        self.assertEqual(self.controller.status, "EXTERNAL")
+        self.assertEqual(self.services.calls, [])
+        await self.controller.async_start_manual(80)
+        self.assertEqual(self.controller.status, "BLOCKED")
+        self.assertEqual(self.services.calls, [])
+
+    async def test_wallbox_power_prevents_false_manual_stop_confirmation(self):
+        self.states.data["sensor.tesla_wall_connector_total_power"] = SimpleNamespace(
+            state="0"
+        )
+        await self.controller.async_set_target(80)
+        await self.controller.async_start_manual()
+        # Real wallbox power remains despite Geely OFF/0 cloud reports.
+        self.states.data["sensor.tesla_wall_connector_total_power"].state = "6.89"
+        await self.controller.async_stop()
+        await self.controller.async_tick()
+        await self.controller.async_tick()
+        self.assertEqual(self.controller.status, "STOP_REQUESTED")
+        self.states.data["sensor.tesla_wall_connector_total_power"].state = "0.0"
+        await self.controller.async_tick()
+        await self.controller.async_tick()
+        self.assertEqual(self.controller.status, "STOPPED")
+
+    async def test_manual_stop_explicitly_stops_preexisting_unmanaged_charge(self):
+        self.states.data["switch.car"].state = "on"
+        self.states.data["sensor.power"].state = "6.5"
+        await self.controller.async_restore()
+        await self.controller.async_stop()
+        self.assertEqual([c[1] for c in self.services.calls], ["turn_off"])
+        self.assertEqual(self.controller.status, "STOP_REQUESTED")
+
+    async def test_reload_does_not_interrupt_sub_100_manual_charge(self):
+        await self.controller.async_set_target(80)
+        await self.controller.async_start_manual()
+        self.assertEqual(self.services.calls[-1][1], "turn_on")
+        await self.controller.async_shutdown()
+        self.assertEqual([c[1] for c in self.services.calls], ["turn_on"])
+        self.assertTrue(self.controller.entry.options["manual_session"]["active"])
+        recovered = LiveChargeController(self.controller.hass, self.controller.entry)
+        await recovered.async_restore()
+        self.assertTrue(recovered.owned)
+        self.assertEqual(self.services.calls[-1][1], "turn_on")
 
     async def test_product_manual_start_does_not_require_arm_toggle(self):
         self.assertFalse(self.controller.armed)
@@ -338,8 +410,13 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.auto.mode, "Off")
         self.assertTrue(self.controller.entry.options["emergency_stop"])
         await self.controller.async_release_emergency_stop()
-        self.assertEqual(self.controller.auto.mode, "Active")
+        # An explicit STOP is still being verified. Releasing the latch
+        # preserves the preference but must not authorise a new START yet.
+        self.assertEqual(self.controller.auto.mode, "Off")
         self.assertTrue(self.controller.entry.options["automatic_charging_enabled"])
+        self.controller.auto.stop_requested_at = None
+        await self.controller.async_reconcile_automatic()
+        self.assertEqual(self.controller.auto.mode, "Active")
 
     async def test_restart_adopts_manual_charge_without_duplicate_start(self):
         self.controller.entry.options["manual_session"] = {

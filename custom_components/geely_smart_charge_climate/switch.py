@@ -24,7 +24,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
 
 class DayEnabledSwitch(ScheduleEntity, SwitchEntity):
-    """Enable one day in the simulation schedule only."""
+    """Enable one vehicle-ready weekday in the charging schedule."""
 
     _attr_icon = "mdi:calendar-check"
 
@@ -100,7 +100,7 @@ class ComfortExpandSwitch(SwitchEntity):
 
 
 class ClimateSlotEnabled(ClimateScheduleSetting, SwitchEntity):
-    """One independent weekly climate slot enable toggle (simulation-only)."""
+    """Enable a real independent weekly climate slot."""
 
     _attr_icon = "mdi:calendar-clock"
 
@@ -149,31 +149,6 @@ class ChargingLinkedComfortSwitch(SwitchEntity):
     async def async_turn_off(self, **kwargs):
         await self._save(False)
 
-
-class LiveTestArmSwitch(SwitchEntity):
-    """Session-only opt-in arming; always OFF after an HA restart."""
-
-    _attr_has_entity_name = True
-    _attr_name = "Live charge test armed"
-    _attr_icon = "mdi:shield-check-outline"
-
-    def __init__(self, entry):
-        self.entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_live_test_armed"
-
-    @property
-    def is_on(self):
-        return self.entry.runtime_data.armed
-
-    async def async_added_to_hass(self):
-        await super().async_added_to_hass()
-        self.async_on_remove(self.entry.runtime_data.listen(self.async_write_ha_state))
-
-    async def async_turn_on(self, **kwargs):
-        await self.entry.runtime_data.async_arm(True)
-
-    async def async_turn_off(self, **kwargs):
-        await self.entry.runtime_data.async_arm(False)
 
 class PublicChargingModeSwitch(SwitchEntity):
     """User-declared public charging. Never infer vehicle location.

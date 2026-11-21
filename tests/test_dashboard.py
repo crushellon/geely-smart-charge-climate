@@ -20,6 +20,7 @@ class DashboardTests(unittest.TestCase):
             "climate_next": "sensor.climate_next",
             "live_test_status": "sensor.live_test_status",
             "manual_charge_status": "sensor.manual_charge_status",
+            "vehicle_charging_status": "sensor.vehicle_charging_status",
             "automatic_charge_mode": "select.test_controller_mode",
             "automatic_charge_decision": "sensor.automatic_charge_decision",
             "public_charging_mode": "switch.public_charging_mode",
@@ -154,7 +155,9 @@ class DashboardTests(unittest.TestCase):
         text = json.dumps(self.config)
         self.assertIn("switch.my_geely_ex5_4034_charging", text)
         self.assertNotIn('"entity": "switch.my_geely_ex5_4034_charging"', text)
-        self.assertIn("Geely power", text)
+        self.assertIn("Geely", text)
+        self.assertIn("sensor.vehicle_charging_status", text)
+        self.assertNotIn("Live test status", text)
         self.assertIn("power not confirmed", text)
         self.assertIn("sensor.my_geely_ex5_4034_charging_power", text)
 

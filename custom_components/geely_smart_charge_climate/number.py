@@ -19,7 +19,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
            for slot in SLOTS for field in ('temperature', 'lead_minutes', 'hold_minutes')]
         + [LinkedComfortTimingNumber(hass, entry, field)
            for field in ('lead_minutes', 'hold_minutes')]
-        + [LiveTestTargetNumber(entry), ManualCabinTempNumber(hass, entry)]
+        + [ManualChargeTargetNumber(entry), ManualCabinTempNumber(hass, entry)]
     )
 
 
@@ -131,8 +131,8 @@ class LinkedComfortTimingNumber(NumberEntity):
         self.async_write_ha_state()
 
 
-class LiveTestTargetNumber(NumberEntity):
-    """User-chosen manual live-test target; no scheduling effect."""
+class ManualChargeTargetNumber(NumberEntity):
+    """User-chosen manual target, preserving its existing HA unique ID."""
 
     _attr_has_entity_name = True
     _attr_name = "Manual charging target"
