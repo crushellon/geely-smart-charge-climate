@@ -33,6 +33,7 @@ env = {
     "CONF_CHARGING_SWITCH": "charging_switch",
     "CONF_CHARGING_POWER": "charging_power",
     "discover_plug_entity": lambda hass, sensor: "binary_sensor.plug",
+    "discover_charging_power_entity": lambda hass, sensor: None,
     "start_preflight": safety.start_preflight,
     "should_stop_owned_session": safety.should_stop_owned_session,
     "MONITORED_GUARDS": (
