@@ -44,6 +44,17 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
             unique_ids[f"{profile}_{field}"] = (
                 "number", f"{entry.entry_id}_{profile}_{field}"
             )
+    for profile in PROFILES:
+        for occupant in ("driver", "passenger"):
+            unique_ids[f"{profile}_{occupant}_seat_mode"] = (
+                "select", f"{entry.entry_id}_{profile}_{occupant}_seat_mode"
+            )
+        unique_ids[f"{profile}_steering_toggle"] = (
+            "switch", f"{entry.entry_id}_{profile}_steering_toggle"
+        )
+        unique_ids[f"show_{profile}_settings"] = (
+            "switch", f"{entry.entry_id}_show_{profile}_settings"
+        )
     result = {}
     for key, (platform, unique_id) in unique_ids.items():
         entity_id = registry.async_get_entity_id(platform, DOMAIN, unique_id)
@@ -137,14 +148,25 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
     if not climate:
         return
     current_cards = climate.get("cards", [])
-    if len(current_cards) != 1 or current_cards[0].get("type") != "markdown":
-        return
-    old_text = current_cards[0].get("content", "")
-    if (
-        "Climate controls and heated-seat profiles will be" not in old_text
-        or "This development release cannot command" not in old_text
-    ):
-        # Not the untouched generated placeholder: leave the dashboard alone.
+    old_placeholder = (
+        len(current_cards) == 1
+        and current_cards[0].get("type") == "markdown"
+        and "Climate controls and heated-seat profiles will be"
+        in current_cards[0].get("content", "")
+        and "This development release cannot command"
+        in current_cards[0].get("content", "")
+    )
+    old_sliders = (
+        len(current_cards) == 3
+        and current_cards[0].get("type") == "markdown"
+        and "Cabin comfort profiles" in current_cards[0].get("content", "")
+        and current_cards[1].get("type") == "entities"
+        and current_cards[1].get("title") == "Warm profile"
+        and current_cards[2].get("type") == "entities"
+        and current_cards[2].get("title") == "Cool profile"
+    )
+    if not (old_placeholder or old_sliders):
+        # Preserve manually edited test dashboards and any newer layout.
         return
     from copy import deepcopy
 
