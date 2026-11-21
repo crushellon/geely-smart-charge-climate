@@ -61,6 +61,7 @@ class DashboardTests(unittest.TestCase):
             self.ids, "sensor.my_geely_ex5_4034_battery",
             "binary_sensor.my_geely_ex5_4034_charger_plug",
             "sensor.my_geely_ex5_4034_charging_power",
+            charging_switch="switch.my_geely_ex5_4034_charging",
         )
 
     def test_four_focused_views(self):
@@ -126,12 +127,22 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("confirmation", actions[0]["cards"][0]["tap_action"])
         self.assertIn("Arm live test", str(cards))
 
-    def test_never_exposes_vehicle_charging_switch_as_control(self):
+    def test_read_only_live_charge_telemetry_without_bypass_toggle(self):
         from json import dumps
-        text = dumps(self.config)
-        self.assertNotIn("switch.my_geely_ex5_4034_charging", text)
-        self.assertNotIn("climate.my_geely", text)
-        self.assertIn("Simulation only", text)
+        charging = self.config["views"][0]["sections"][0]["cards"]
+        live = [card for card in charging
+                if card.get("type") == "markdown"
+                and "Live Geely charging status" in card.get("content", "")]
+        self.assertEqual(len(live), 1)
+        content = live[0]["content"]
+        self.assertIn("switch.my_geely_ex5_4034_charging", content)
+        self.assertIn("sensor.my_geely_ex5_4034_charging_power", content)
+        self.assertIn("binary_sensor.my_geely_ex5_4034_charger_plug", content)
+        self.assertIn("states(", content)
+        all_cards = dumps(self.config)
+        self.assertNotIn('"entity": "switch.my_geely_ex5_4034_charging"', all_cards)
+        self.assertNotIn("climate.my_geely", all_cards)
+        self.assertIn("simulation-only", all_cards)
 
     def test_available_vehicle_data_in_its_own_page(self):
         rich = module.dashboard_config(
