@@ -77,6 +77,11 @@ def independent_climate_schedule_cards(entity_ids: dict[str, str]) -> list[dict]
         },
         {
             "type": "entity",
+            "entity": entity_ids["scheduled_climate_enabled"],
+            "name": "Scheduled climate enabled",
+        },
+        {
+            "type": "entity",
             "entity": entity_ids["climate_next"],
             "name": "Next independent climate appointment",
         },
