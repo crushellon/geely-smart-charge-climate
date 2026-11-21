@@ -122,7 +122,14 @@ class LiveChargeController:
                 if self._unmanaged_stop_observations >= 2:
                     self.unmanaged_charge = False
                     self._unmanaged_stop_observations = 0
+                    if self.status in ("EXTERNAL", "STOP_REQUESTED"):
+                        self.status = "IDLE"
+                        self.message = "Previous charge has stopped"
                     self._notify()
+                    if hasattr(self.hass, "async_create_task"):
+                        self.hass.async_create_task(
+                            self.async_reconcile_automatic()
+                        )
             else:
                 self._unmanaged_stop_observations = 0
         elif (self._startup_observation_until is not None
@@ -163,7 +170,7 @@ class LiveChargeController:
             except (ValueError, TypeError):
                 return "Charging power unavailable: refresh vehicle data"
         return start_preflight(
-            armed=self.armed,
+            armed=True,
             battery=self._raw(self.battery),
             plugged=self._raw(self.plug),
             charging=self._raw(self.charging_switch),
@@ -194,6 +201,7 @@ class LiveChargeController:
         """After manual, emergency, public or restart restore user's intent."""
         wanted = self.entry.options.get("automatic_charging_enabled", False) is True
         blocked = (self.owned or self.stop_requested_at is not None
+                   or self.auto.stop_requested_at is not None
                    or self.unmanaged_charge
                    or self.public_mode()
                    or self.entry.options.get("emergency_stop", False) is True)
