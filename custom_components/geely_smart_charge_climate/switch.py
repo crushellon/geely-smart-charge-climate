@@ -215,9 +215,8 @@ class PublicChargingModeSwitch(SwitchEntity):
 class AutomaticChargingEnabledSwitch(SwitchEntity):
     """Normal charging-schedule on/off control for the EV Control dashboard.
 
-    For this experimental release, activation is deliberately session-only.
-    A restart disarms automatic charging until recovery is proven; the
-    dashboard prominently explains this instead of implying persistence.
+    Enabled preference is persisted. Vehicle ownership and command state
+    recover by observation after a restart, subject to safety interlocks.
     """
 
     _attr_has_entity_name = True
@@ -230,7 +229,7 @@ class AutomaticChargingEnabledSwitch(SwitchEntity):
 
     @property
     def is_on(self):
-        return self.entry.runtime_data.auto.mode == "Active"
+        return self.entry.options.get("automatic_charging_enabled", False) is True
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
@@ -239,11 +238,11 @@ class AutomaticChargingEnabledSwitch(SwitchEntity):
         )
 
     async def async_turn_on(self, **kwargs):
-        await self.entry.runtime_data.auto.async_set_mode("Active")
+        await self.entry.runtime_data.async_set_automatic_enabled(True)
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
-        await self.entry.runtime_data.auto.async_set_mode("Off")
+        await self.entry.runtime_data.async_set_automatic_enabled(False)
         self.async_write_ha_state()
 
 
