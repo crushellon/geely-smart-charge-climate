@@ -243,11 +243,12 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_wallbox_power_prevents_false_manual_stop_confirmation(self):
         self.states.data["sensor.tesla_wall_connector_total_power"] = SimpleNamespace(
-            state="6.89"
+            state="0"
         )
         await self.controller.async_set_target(80)
         await self.controller.async_start_manual()
         # Real wallbox power remains despite Geely OFF/0 cloud reports.
+        self.states.data["sensor.tesla_wall_connector_total_power"].state = "6.89"
         await self.controller.async_stop()
         await self.controller.async_tick()
         await self.controller.async_tick()
