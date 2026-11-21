@@ -105,17 +105,22 @@ class LiveChargeController:
     def _guards(self):
         return {key: self._raw(key) for key in MONITORED_GUARDS}
 
+    def _wallbox_kw(self):
+        """Optional power confirmation. No wallbox API calls are ever issued."""
+        try:
+            value = float(self._raw(self.wallbox_power))
+            return value if isfinite(value) and value >= 0 else None
+        except (ValueError, TypeError):
+            return None
+
     def vehicle_activity(self):
         """Best read-only power indication; Tesla is optional, never a command."""
         activity, power = vehicle_activity(
             self._raw(self.charging_switch), self._raw(self.charging_power)
         )
         if activity != "CHARGING":
-            try:
-                wall_power = float(self._raw(self.wallbox_power))
-            except (ValueError, TypeError):
-                wall_power = 0.0
-            if isfinite(wall_power) and wall_power > 0.25:
+            wall_power = self._wallbox_kw()
+            if wall_power is not None and wall_power > 0.25:
                 return "CHARGING", wall_power
         return activity, power
 
@@ -550,6 +555,11 @@ class LiveChargeController:
                     or timestamp <= self.stop_started_at):
                 return False
         if self._raw(self.charging_switch) != "off":
+            return False
+        wallbox = self._wallbox_kw()
+        if wallbox is not None and wallbox > 0.25:
+            # Geely cloud may report OFF/0 before real wallbox power ceases.
+            # Optional wallbox data can prevent a FALSE verified STOP.
             return False
         if not self.charging_power:
             return True
