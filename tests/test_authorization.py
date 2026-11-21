@@ -36,6 +36,44 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual(d.target, 80)
         self.assertEqual(d.day, "monday")
 
+    def test_3am_tuesday_deadline_authorises_monday_evening(self):
+        # Charging 20% -> 80% needs around 6h 19m at 6.5 kW,
+        # so Monday evening belongs to Tuesday's 03:00 ready-by schedule.
+        schedule = {"tuesday": {"enabled": True, "target": 80, "ready_time": "03:00"}}
+        monday_evening = datetime(2026, 11, 23, 22, tzinfo=ZoneInfo("Australia/Brisbane"))
+        decision = auth.decide(**(self.params | {
+            "now": monday_evening, "soc": 20, "schedule": schedule,
+        }))
+        self.assertEqual(decision.action, "START")
+        self.assertEqual(decision.day, "tuesday")
+        self.assertEqual(decision.ready_by, datetime(
+            2026, 11, 24, 3, tzinfo=ZoneInfo("Australia/Brisbane")))
+        self.assertEqual(decision.start_at.date(), monday_evening.date())
+
+    def test_10pm_ready_time_allows_same_day_start(self):
+        schedule = {"wednesday": {"enabled": True, "target": 80, "ready_time": "22:00"}}
+        tz = ZoneInfo("Australia/Brisbane")
+        before = auth.decide(**(self.params | {
+            "now": datetime(2026, 11, 25, 17, tzinfo=tz),
+            "soc": 60, "schedule": schedule,
+        }))
+        during = auth.decide(**(self.params | {
+            "now": datetime(2026, 11, 25, 20, tzinfo=tz),
+            "soc": 60, "schedule": schedule,
+        }))
+        self.assertEqual(before.action, "WAIT")
+        self.assertEqual(during.action, "START")
+        self.assertEqual(during.day, "wednesday")
+        self.assertEqual(during.start_at.date(), during.ready_by.date())
+
+    def test_completed_target_does_not_restart_within_window(self):
+        schedule = {"wednesday": {"enabled": True, "target": 80, "ready_time": "22:00"}}
+        decision = auth.decide(**(self.params | {
+            "now": datetime(2026, 11, 25, 20, tzinfo=ZoneInfo("Australia/Brisbane")),
+            "soc": 80, "charging": False, "schedule": schedule,
+        }))
+        self.assertNotEqual(decision.action, "START")
+
     def test_unauthorised_charge_outside_window(self):
         d = auth.decide(**(self.params | {"charging": True}))
         self.assertEqual(d.action, "STOP")
