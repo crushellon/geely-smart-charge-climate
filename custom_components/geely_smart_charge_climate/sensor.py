@@ -19,6 +19,7 @@ from .const import (
     DEFAULT_USABLE_CAPACITY_KWH, DOMAIN,
 )
 from .rate_learning import RateLearner, effective_fallback_kw
+from .discovery import discover_plug_entity
 from .simulator import next_deadline, simulate
 
 # What-if demonstration inputs; NOT the user's active seven-day schedule.
@@ -49,6 +50,7 @@ class GeelyObservedBase(SensorEntity):
         self._battery = entry.data[CONF_BATTERY_ENTITY]
         self._switch = entry.data[CONF_CHARGING_SWITCH]
         self._power = entry.data.get(CONF_CHARGING_POWER)
+        self._plug = discover_plug_entity(hass, self._battery)
 
     async def async_added_to_hass(self) -> None:
         """Refresh when selected source entities update."""
@@ -56,6 +58,8 @@ class GeelyObservedBase(SensorEntity):
         entities = [self._battery, self._switch]
         if self._power:
             entities.append(self._power)
+        if self._plug:
+            entities.append(self._plug)
 
         def changed(event) -> None:
             self.async_write_ha_state()
@@ -95,11 +99,13 @@ class GeelyObservationSensor(GeelyObservedBase):
             "control_mode": "read_only",
             "battery_source": self._battery,
             "charging_switch_source": self._switch,
+            "plug_source": self._plug,
         }
         for name, entity_id in (
             ("battery_state", self._battery),
             ("charging_switch_state", self._switch),
             ("charging_power_state", self._power),
+            ("plug_state", self._plug),
         ):
             if entity_id:
                 state = self.hass.states.get(entity_id)
@@ -136,14 +142,18 @@ class GeelySimulationSensor(GeelyObservedBase):
         if rate is None:
             rate = effective_fallback_kw(self._rated_kw) * 100 / DEFAULT_USABLE_CAPACITY_KWH
         effective_kw = rate * DEFAULT_USABLE_CAPACITY_KWH / 100
+        plug_state = self.hass.states.get(self._plug) if self._plug else None
+        plugged = (
+            True if plug_state and plug_state.state == "on"
+            else False if plug_state and plug_state.state == "off"
+            else None
+        )
         return simulate(
             now=now, ready_by=ready, soc=soc,
             target=DEMO_TARGET, effective_kw=effective_kw,
             usable_kwh=DEFAULT_USABLE_CAPACITY_KWH,
             charging=bool(charging and charging.state == "on"),
-            # Plug and session-state confirmation are intentionally absent.
-            # No START can be authorised by this read-only preview.
-            plugged=None,
+            plugged=plugged,
         )
 
     @property
@@ -172,7 +182,9 @@ class GeelySimulationSensor(GeelyObservedBase):
             "ready_by": result.ready_by.isoformat(),
             "termination_policy": result.termination,
             "reason": result.reason,
-            "plug_status_configured": False,
+            "plug_status_configured": self._plug is not None,
+            "plug_source": self._plug,
+            "plug_state": (self.hass.states.get(self._plug).state if self._plug and self.hass.states.get(self._plug) else "unavailable"),
         }
 
     async def async_added_to_hass(self) -> None:
