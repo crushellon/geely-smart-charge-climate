@@ -311,6 +311,35 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.auto.async_tick()
         self.assertEqual(self.services.calls, ["turn_on", "turn_off", "turn_on"])
 
+    async def test_resume_before_charge_window_rearms_but_waits_until_due(self):
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_set_mode("Off")
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        # Move ready time further into future so rearm must not START yet.
+        self.entry.options["weekly_schedule"]["monday"]["ready_time"] = "08:00"
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.auto.status, "WAITING")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertNotIn(("monday", "2026-11-23"),
+                         self.auto.finished_deadlines)
+        # Change ready-by closer again: same rearmed request now starts.
+        self.entry.options["weekly_schedule"]["monday"]["ready_time"] = "07:00"
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off", "turn_on"])
+
+    async def test_unknown_soc_never_rearms_cancelled_session(self):
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_set_mode("Off")
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.values["sensor.battery"] = "unavailable"
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertIn(("monday", "2026-11-23"), self.auto.finished_deadlines)
+
     async def test_true_100_completion_does_not_restart_without_new_request(self):
         self.entry.options["weekly_schedule"]["monday"]["target"] = 100
         await self.auto.async_set_mode("Active")
