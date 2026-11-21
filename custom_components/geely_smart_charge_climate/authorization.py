@@ -89,6 +89,18 @@ def decide(
         x for x in candidates
         if x["start_at"] <= now < x["ready_by"]
     ]
+    # If the car is still actively charging a scheduled 100% session, the
+    # target itself must never trigger a stop. Real owned sessions are latched
+    # separately by the controller until Geely ends them.
+    if charging and soc >= 100:
+        full = [
+            x for x in candidates if x["target"] == 100
+            and x["ready_by"].date() == now.date()
+            and now < x["ready_by"]
+        ]
+        if full:
+            full.sort(key=lambda x: x["ready_by"])
+            return result("AUTHORISED", "Full-charge termination belongs to Geely", full[0])
     active.sort(key=lambda x: (x["ready_by"], x["day"]))
     if active:
         plan = active[0]
