@@ -19,7 +19,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         + [ClimateSlotEnabled(hass, entry, slot, 'enabled') for slot in SLOTS]
         + [ClimateSlotEnabled(hass, entry, slot, 'steering_heat') for slot in SLOTS]
         + [ChargingLinkedComfortSwitch(hass, entry, day) for day in DAY_NAMES]
-        + [LiveTestArmSwitch(entry), PublicChargingModeSwitch(hass, entry), AutomaticChargingEnabledSwitch(entry), EmergencyStopSwitch(hass, entry)]
+        + [PublicChargingModeSwitch(hass, entry), AutomaticChargingEnabledSwitch(entry), EmergencyStopSwitch(hass, entry)]
     )
 
 
