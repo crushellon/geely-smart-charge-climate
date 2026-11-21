@@ -138,7 +138,7 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
             "monday|2026-11-23"]["outcome"], "completed")
         another = Auto(self.manual)
         self.values["sensor.battery"] = "79"  # Stale cloud rollback
-        await another.async_set_mode("Active")
+        await another.async_set_mode("Active", deliberate=False)
         self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
         self.assertEqual(another.status, "COMPLETED")
 
