@@ -6,6 +6,8 @@ This first milestone MUST NOT control vehicle charging or climate.
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+
+from .dashboard import async_ensure_dashboard
 import logging
 
 from .dashboard_setup import async_ensure_dashboard
