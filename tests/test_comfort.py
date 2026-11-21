@@ -25,9 +25,13 @@ class ComfortTests(unittest.TestCase):
 
     def test_invalid_settings_rejected(self):
         for field, value in (("temperature", 40), ("driver_seat_heat", 4),
-                             ("steering_heat", 2), ("temperature", 21.5)):
+                             ("steering_heat", 2), ("temperature", 21.25)):
             with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                 module.validate_field(field, value)
+
+    def test_half_degree_temperature_supported(self):
+        options = module.set_value({}, "cool", "temperature", 16.5)
+        self.assertEqual(module.get_value(options, "cool", "temperature"), 16.5)
 
     def test_avoids_vehicle_commands(self):
         for path in ("comfort.py", "number.py", "dashboard_content.py"):
