@@ -19,7 +19,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
            for slot in SLOTS for field in ('temperature', 'lead_minutes', 'hold_minutes')]
         + [LinkedComfortTimingNumber(hass, entry, field)
            for field in ('lead_minutes', 'hold_minutes')]
-        + [LiveTestTargetNumber(entry)]
+        + [LiveTestTargetNumber(entry), ManualCabinTempNumber(hass, entry)]
     )
 
 
@@ -157,3 +157,32 @@ class LiveTestTargetNumber(NumberEntity):
 
     async def async_set_native_value(self, value):
         await self.entry.runtime_data.async_set_target(value)
+
+
+class ManualCabinTempNumber(NumberEntity):
+    """Temperature for the explicit Custom temperature ON button."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Custom cabin temperature"
+    _attr_icon = "mdi:thermometer"
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 16
+    _attr_native_max_value = 30
+    _attr_native_step = 0.5
+    _attr_native_unit_of_measurement = "°C"
+
+    def __init__(self, hass, entry):
+        self.hass = hass
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_manual_cabin_temperature"
+
+    @property
+    def native_value(self):
+        return self.entry.options.get("manual_cabin_temperature", 22.0)
+
+    async def async_set_native_value(self, value):
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            options={**self.entry.options, "manual_cabin_temperature": float(value)},
+        )
+        self.async_write_ha_state()
