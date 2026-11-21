@@ -38,6 +38,13 @@ class DashboardTests(unittest.TestCase):
             self.ids[f"{day}_linked_comfort_profile"] = f"select.{day}_linked_comfort_profile"
         self.ids["linked_comfort_lead_minutes"] = "number.linked_comfort_lead_minutes"
         self.ids["linked_comfort_hold_minutes"] = "number.linked_comfort_hold_minutes"
+        self.ids.update({
+            "live_test_status": "sensor.live_test_status",
+            "live_test_armed": "switch.live_test_armed",
+            "live_test_target": "number.live_test_target",
+            "live_test_start": "button.live_test_start",
+            "live_test_stop": "button.live_test_stop",
+        })
         self.ids["climate_next"] = "sensor.climate_next"
         for slot in range(1, 8):
             for field, prefix in (
@@ -107,6 +114,17 @@ class DashboardTests(unittest.TestCase):
             "select.climate_slot_1_driver_seat",
             [r["entity"] for r in slots[0]["entities"] if "entity" in r],
         )
+
+    def test_live_manual_test_requires_explicit_user_button(self):
+        sections = self.config["views"][0]["sections"]
+        cards = sections[0]["cards"]
+        actions = [card for card in cards if card.get("type") == "grid"
+                   and any(c.get("type") == "button" for c in card["cards"])]
+        self.assertEqual(len(actions), 1)
+        entities = [c["entity"] for c in actions[0]["cards"]]
+        self.assertEqual(entities, ["button.live_test_start", "button.live_test_stop"])
+        self.assertIn("confirmation", actions[0]["cards"][0]["tap_action"])
+        self.assertIn("Arm live test", str(cards))
 
     def test_never_exposes_vehicle_charging_switch_as_control(self):
         from json import dumps
