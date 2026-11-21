@@ -47,6 +47,7 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
         "automatic_charging_enabled": ("switch", f"{entry.entry_id}_automatic_charging_enabled"),
         "emergency_stop": ("switch", f"{entry.entry_id}_emergency_stop"),
         "manual_charge_target": ("number", f"{entry.entry_id}_live_test_target"),
+        "manual_charge_status": ("sensor", f"{entry.entry_id}_manual_charge_status"),
         "manual_cabin_temperature": ("number", f"{entry.entry_id}_manual_cabin_temperature"),
         "manual_climate_status": ("sensor", f"{entry.entry_id}_manual_climate_status"),
     }
