@@ -132,14 +132,16 @@ class LiveChargeController:
                         )
             else:
                 self._unmanaged_stop_observations = 0
-        elif (self._startup_observation_until is not None
-              and dt_util.utcnow() <= self._startup_observation_until
+        elif (self.auto.stop_requested_at is None
+              and self.auto.stop_watch_until is None
               and activity in ("CHARGING", "CHARGING_REPORTED")):
+            # Charging may have started through Geely, a prior HA version or
+            # another user action. Origin cannot be proven from cloud states.
+            # The product must not claim a manual target or command STOP.
             self.unmanaged_charge = True
             self.status = "EXTERNAL"
             self.message = (
-                "Charging observed after integration reload; "
-                "previous controller ownership not available"
+                "Vehicle charging observed; controller ownership unknown"
             )
             self._notify()
 
