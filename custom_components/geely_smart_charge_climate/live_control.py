@@ -17,6 +17,7 @@ from homeassistant.util import dt as dt_util
 from .const import CONF_BATTERY_ENTITY, CONF_CHARGING_SWITCH, CONF_CHARGING_POWER
 from .discovery import discover_plug_entity, discover_charging_power_entity
 from .auto_control import AutomaticChargeController
+from .manual_climate import ManualClimateController
 from .live_safety import (
     EMERGENCY_STOP, LEGACY_ACTIVE, LEGACY_CONTROLLER, OLD_FULL_CHARGE,
     PUBLIC_MODE, start_preflight, should_stop_owned_session,
@@ -60,6 +61,7 @@ class LiveChargeController:
         self._callbacks = []
         self._unsubs = []
         self.auto = AutomaticChargeController(self)
+        self.climate = ManualClimateController(hass, entry, self._notify)
 
     def listen(self, callback_fn):
         self._callbacks.append(callback_fn)
@@ -221,6 +223,9 @@ class LiveChargeController:
         if not self.owned:
             self.armed = False
             self._notify()
+
+    async def async_manual_climate(self, action):
+        await self.climate.apply(action)
 
     async def async_resume_schedule(self):
         """Deliberate return from manual charging to automatic scheduling."""
