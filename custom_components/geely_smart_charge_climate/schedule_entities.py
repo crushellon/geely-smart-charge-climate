@@ -48,3 +48,8 @@ class ScheduleEntity(Entity):
             options={**self.entry.options, SCHEDULE_KEY: updated},
         )
         self.async_write_ha_state()
+        # Refresh the automatic authorisation decision immediately after
+        # committing the same weekly schedule used by the simulator.
+        controller = getattr(self.entry, "runtime_data", None)
+        if controller is not None and hasattr(controller, "auto"):
+            await controller.auto.async_tick()
