@@ -126,6 +126,24 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("switch.public_charging_mode", str(charging))
         self.assertNotIn("Home confirmed", str(charging))
 
+    def test_live_decision_displays_active_schedule_and_comfort(self):
+        cards = self.config["views"][0]["sections"][0]["cards"]
+        decision = next(card for card in cards
+                        if card.get("type") == "markdown"
+                        and "#### Latest decision" in card.get("content", ""))
+        content = decision["content"]
+        for attribute in (
+            "active_target", "active_ready_by", "linked_comfort_enabled",
+            "linked_comfort_profile", "linked_comfort_temperature",
+            "linked_comfort_driver_seat", "linked_comfort_passenger_seat",
+            "linked_comfort_steering_heat", "linked_comfort_lead_minutes",
+            "linked_comfort_hold_minutes",
+        ):
+            with self.subTest(attribute=attribute):
+                self.assertIn(attribute, content)
+        self.assertIn("automatic climate commands are not enabled yet", content)
+        self.assertNotIn("\\\\n", content)
+
     def test_live_manual_test_requires_explicit_user_button(self):
         sections = self.config["views"][0]["sections"]
         cards = sections[0]["cards"]
