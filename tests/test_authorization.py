@@ -69,7 +69,9 @@ class AuthorizationTests(unittest.TestCase):
         self.assertEqual(decision.action, "BLOCKED")
 
     def test_geely_plug_and_user_mode_are_sufficient(self):
-        decision = auth.decide(**self.params)
+        decision = auth.decide(**(self.params | {
+            "now": self.now + timedelta(hours=6),
+        }))
         self.assertEqual(decision.action, "START")
         self.assertEqual(decision.day, "monday")
 
