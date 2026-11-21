@@ -32,6 +32,7 @@ body = next(node for node in tree.body
             if isinstance(node, ast.ClassDef) and node.name == "LiveChargeController")
 class DummyAutomatic:
     def __init__(self, manual):
+        self.manual = manual
         self.owned = False
         self.stop_requested_at = None
         self.mode = "Off"
