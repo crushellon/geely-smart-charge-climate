@@ -135,6 +135,18 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.auto.async_tick()
         self.assertEqual(self.auto.status, "COMPLETED")
 
+    async def test_completed_session_does_not_restart_in_same_window(self):
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on"])
+        # Geely ends the session before target (network or car decides).
+        self.values["switch.car"] = "off"
+        self.values["sensor.power"] = "0"
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "COMPLETED")
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on"])
+
     async def test_100_survives_graceful_reload(self):
         self.entry.options["weekly_schedule"]["monday"]["target"] = 100
         await self.auto.async_set_mode("Active")
