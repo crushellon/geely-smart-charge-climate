@@ -4,6 +4,8 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from .schedule_entities import ScheduleEntity
 from .comfort import PROFILES, FIELDS, get_value, set_value
 from .weekly_schedule import DAY_NAMES
+from .climate_schedule import SLOTS
+from .climate_schedule_entities import ClimateScheduleSetting
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -12,6 +14,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
         [DayTargetNumber(hass, entry, day, "target") for day in DAY_NAMES]
         + [ComfortPreferenceNumber(hass, entry, profile, field)
            for profile in PROFILES for field in FIELDS]
+        + [ClimateSlotNumber(hass, entry, slot, field)
+           for slot in SLOTS for field in ('temperature', 'lead_minutes', 'hold_minutes')]
     )
 
 
@@ -64,3 +68,31 @@ class ComfortPreferenceNumber(NumberEntity):
             options=set_value(self.entry.options, self.profile, self.field, value),
         )
         self.async_write_ha_state()
+
+
+class ClimateSlotNumber(ClimateScheduleSetting, NumberEntity):
+    """One departure temperature or lead/hold duration setting."""
+
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, hass, entry, slot, field):
+        super().__init__(hass, entry, slot, field)
+        if field == "temperature":
+            self._attr_native_min_value = 16
+            self._attr_native_max_value = 30
+            self._attr_native_step = 0.5
+            self._attr_native_unit_of_measurement = "°C"
+            self._attr_icon = "mdi:thermometer"
+        else:
+            self._attr_native_min_value = 0
+            self._attr_native_max_value = 120
+            self._attr_native_step = 1
+            self._attr_native_unit_of_measurement = "min"
+            self._attr_icon = "mdi:timer"
+
+    @property
+    def native_value(self):
+        return self.current
+
+    async def async_set_native_value(self, value):
+        await self.save(value)
