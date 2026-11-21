@@ -155,7 +155,9 @@ class DashboardTests(unittest.TestCase):
         text = json.dumps(self.config)
         self.assertIn("switch.my_geely_ex5_4034_charging", text)
         self.assertNotIn('"entity": "switch.my_geely_ex5_4034_charging"', text)
-        self.assertIn("Geely power", text)
+        self.assertIn("Geely", text)
+        self.assertIn("sensor.vehicle_charging_status", text)
+        self.assertNotIn("Live test status", text)
         self.assertIn("power not confirmed", text)
         self.assertIn("sensor.my_geely_ex5_4034_charging_power", text)
 
