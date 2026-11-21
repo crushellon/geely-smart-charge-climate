@@ -135,7 +135,7 @@ class LiveTestTargetNumber(NumberEntity):
     """User-chosen manual live-test target; no scheduling effect."""
 
     _attr_has_entity_name = True
-    _attr_name = "Live test battery target"
+    _attr_name = "Manual charging target"
     _attr_icon = "mdi:battery-charging"
     _attr_mode = NumberMode.SLIDER
     _attr_native_min_value = 50
