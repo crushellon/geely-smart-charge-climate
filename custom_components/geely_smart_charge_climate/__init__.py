@@ -3,6 +3,8 @@
 This first milestone MUST NOT control vehicle charging or climate.
 """
 
+import logging
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -11,6 +13,8 @@ from .dashboard import async_ensure_dashboard
 import logging
 
 from .dashboard_setup import async_ensure_dashboard
+
+_LOGGER = logging.getLogger(__name__)
 
 _LOGGER = logging.getLogger(__name__)
 
