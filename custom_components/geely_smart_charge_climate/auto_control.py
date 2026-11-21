@@ -516,6 +516,12 @@ class AutomaticChargeController:
                     return
                 elapsed = dt_util.utcnow() - self.stop_requested_at
                 if elapsed >= STOP_RETRY:
+                    # When a fresh OFF/zero report has arrived, wait for the
+                    # second observation instead of resetting its counter with
+                    # a needless retry. A stale or positive power report still
+                    # triggers bounded reassertion of the OFF command.
+                    if self._stopped():
+                        return
                     if self.stop_attempts < 3:
                         await self._request_stop("Retrying unconfirmed stop")
                     else:
