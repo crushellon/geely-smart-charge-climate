@@ -42,7 +42,6 @@ env = {
     "er": SimpleNamespace(async_get=lambda hass: SimpleNamespace(
         async_get_entity_id=lambda *a: None)),
     "DEFAULT_USABLE_CAPACITY_KWH": 68.39,
-    "HOME_WALL_CONNECTOR": "binary_sensor.tesla_wall_connector_vehicle_connected",
     "MODES": ("Off", "Monitor", "Active"),
     "INTERLOCKS": (safety.LEGACY_CONTROLLER, safety.LEGACY_ACTIVE,
                    safety.OLD_FULL_CHARGE, safety.PUBLIC_MODE,
@@ -75,7 +74,6 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
             "sensor.battery": "60",
             "switch.car": "off", "sensor.power": "0",
             "binary_sensor.plug": "on",
-            "binary_sensor.tesla_wall_connector_vehicle_connected": "on",
             **{key: "off" for key in env["INTERLOCKS"]},
         }
         self.services = FakeServices(self.values)
@@ -177,7 +175,7 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
         self.assertIsNotNone(self.auto.stop_requested_at)
 
-    async def test_guard_detects_and_stops_unexpected_home_charge(self):
+    async def test_guard_detects_and_stops_unexpected_geely_charge(self):
         self.entry.options["weekly_schedule"] = {}
         self.values["switch.car"] = "on"
         self.values["sensor.power"] = "6"
@@ -192,14 +190,16 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.auto.status, "STOPPED")
         self.assertIn("Unauthorised", self.auto.message)
 
-    async def test_guard_does_not_stop_without_home_confirmation(self):
-        self.entry.options["weekly_schedule"] = {}
-        self.values["switch.car"] = "on"
-        self.values["sensor.power"] = "6"
-        self.values["binary_sensor.tesla_wall_connector_vehicle_connected"] = "off"
+    async def test_geely_only_works_without_charging_power_entity(self):
+        self.manual.charging_power = None
         await self.auto.async_set_mode("Active")
-        self.assertEqual(self.services.calls, [])
-        self.assertEqual(self.auto.status, "UNKNOWN")
+        self.assertEqual(self.services.calls, ["turn_on"])
+        self.values["sensor.battery"] = "80"
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
 
     async def test_emergency_stops_unowned_home_charge_immediately(self):
         self.entry.options["weekly_schedule"] = {}
@@ -218,6 +218,39 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.auto.async_set_mode("Active")
         self.assertEqual(self.services.calls, [])
         self.assertEqual(self.auto.status, "BLOCKED")
+
+    async def test_native_public_mode_blocks_start(self):
+        self.entry.options["public_charging_mode"] = True
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, [])
+        self.assertEqual(self.auto.status, "BLOCKED")
+
+    async def test_native_public_mode_blocks_unexpected_charge_stop(self):
+        self.entry.options["weekly_schedule"] = {}
+        self.entry.options["public_charging_mode"] = True
+        self.values["switch.car"] = "on"
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, [])
+        self.assertEqual(self.auto.status, "BLOCKED")
+
+    async def test_public_mode_releases_owned_charge_without_stop(self):
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on"])
+        self.entry.options["public_charging_mode"] = True
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on"])
+        self.assertFalse(self.auto.owned)
+        self.assertEqual(self.auto.status, "BLOCKED")
+
+    async def test_public_mode_cancels_pending_stop_retry(self):
+        await self.auto.async_set_mode("Active")
+        self.values["sensor.battery"] = "80"
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.entry.options["public_charging_mode"] = True
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertIsNone(self.auto.stop_requested_at)
 
     async def test_manual_priority(self):
         self.manual.armed = True

@@ -80,7 +80,16 @@ class LiveChargeController:
     def _guards(self):
         return {key: self._raw(key) for key in MONITORED_GUARDS}
 
+    def public_mode(self):
+        """Persistent integration switch or existing legacy helper is ON."""
+        return (
+            self.entry.options.get("public_charging_mode", False) is True
+            or self._raw(PUBLIC_MODE) == "on"
+        )
+
     def preflight(self):
+        if self.public_mode():
+            return "Public charging mode is enabled"
         guards = self._guards()
         # A deliberately missing legacy helper on a new HA installation is
         # harmless. An existing failed/unavailable helper blocks live testing.
@@ -104,8 +113,7 @@ class LiveChargeController:
         )
 
     async def async_start_listening(self):
-        entities = [self.battery, self.charging_switch, *MONITORED_GUARDS,
-                    "binary_sensor.tesla_wall_connector_vehicle_connected"]
+        entities = [self.battery, self.charging_switch, *MONITORED_GUARDS]
         if self.charging_power:
             entities.append(self.charging_power)
         if self.plug:
@@ -209,6 +217,9 @@ class LiveChargeController:
             self.message = "No integration-owned charge session to stop"
             self._notify()
             return
+        if self.public_mode():
+            self._finish("BLOCKED", "Public mode enabled; manual stop suppressed")
+            return
         self.stop_note = reason
         self.stop_requested_at = dt_util.utcnow()
         self.stop_attempts += 1
@@ -272,7 +283,7 @@ class LiveChargeController:
             if not self.owned:
                 return
             guards = self._guards()
-            if guards.get(PUBLIC_MODE) == "on":
+            if self.public_mode():
                 # Avoid commanding a public charge if the car was relocated.
                 self._finish(
                     "BLOCKED",
@@ -337,7 +348,8 @@ class LiveChargeController:
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
-        if self.owned and self.active_target is not None and self.active_target < 100:
+        if (self.owned and self.active_target is not None
+                and self.active_target < 100 and not self.public_mode()):
             async with self._lock:
                 await self._stop_locked("Integration unloading: stop owned test")
         self.armed = False

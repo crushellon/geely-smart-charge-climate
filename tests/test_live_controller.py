@@ -99,7 +99,7 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
             "battery_entity": "sensor.battery",
             "charging_switch": "switch.car",
             "charging_power": "sensor.power",
-        })
+        }, options={})
         self.controller = LiveChargeController(hass, entry)
         self.states = states
         self.services = services
@@ -153,6 +153,22 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.controller.async_arm(False)
         self.assertEqual(self.services.calls[-1][1], "turn_off")
         self.assertFalse(self.controller.armed)
+
+    async def test_native_public_mode_blocks_manual_start(self):
+        self.controller.entry.options["public_charging_mode"] = True
+        await self.controller.async_arm(True)
+        await self.controller.async_start()
+        self.assertEqual(self.services.calls, [])
+        self.assertEqual(self.controller.status, "BLOCKED")
+
+    async def test_public_mode_releases_owned_manual_charge_without_stopping(self):
+        await self.controller.async_arm(True)
+        await self.controller.async_start()
+        self.assertEqual(self.services.calls[-1][1], "turn_on")
+        self.controller.entry.options["public_charging_mode"] = True
+        await self.controller.async_tick()
+        self.assertEqual([c[1] for c in self.services.calls], ["turn_on"])
+        self.assertFalse(self.controller.owned)
 
     async def test_public_mode_blocks_start(self):
         self.states.data[safety.PUBLIC_MODE].state = "on"

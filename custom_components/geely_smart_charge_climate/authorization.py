@@ -1,8 +1,9 @@
 """Pure charging authorisation policy, evaluated without vehicle commands.
 
-A ready-by day covers its preceding night. An authorisation exists only during
-a computed charging window; no configured day is enabled by default. 100%
-always belongs to the vehicle. Public charging is outside this controller.
+A ready-by day may start charging on the previous date. An authorisation exists
+only during a computed charging window; no day is enabled by default.
+Public charging is excluded using an explicit user-operated switch, not location
+inference. The vehicle owns normal 100% charge termination.
 """
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -23,15 +24,15 @@ class ChargeDecision:
 
 def decide(
     *, now: datetime, schedule: dict, soc: float | None, charging: bool,
-    at_home: bool | None, plugged: bool | None,
+    plugged: bool | None,
     rate_kw: float = 6.5, capacity_kwh: float = 68.39,
     public_mode: bool = False, emergency: bool = False,
     legacy_clear: bool = True, manual_owned: bool = False,
     buffer_minutes: int = 15,
 ) -> ChargeDecision:
-    """Evaluate home-only charging authorisation and next scheduled start.
+    """Evaluate user-authorised charging, without assuming vehicle location.
 
-    Never command, notify or infer home from vehicle plug state alone.
+    The user must turn on Public Charging Mode whenever away/public charging.
     """
     def result(action, reason, plan=None):
         return ChargeDecision(
@@ -54,8 +55,6 @@ def decide(
         return result("BLOCKED", "Another charging controller may be active")
     if manual_owned:
         return result("AUTHORISED", "Integration-owned manual charge is in progress")
-    if at_home is not True:
-        return result("UNKNOWN", "Home wall connector not positively confirmed")
     if plugged is not True:
         return result("UNKNOWN", "Vehicle charger connection not confirmed")
     if soc is None or not isfinite(soc) or not 0 <= soc <= 100:
