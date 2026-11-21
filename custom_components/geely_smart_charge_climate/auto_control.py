@@ -241,17 +241,19 @@ class AutomaticChargeController:
              "day": self.owned_day, "deadline": self.owned_deadline.isoformat()}
             if active and self.owned_deadline else {"active": False}
         )
-        self.manual._save_options(automatic_session=session)
+        if hasattr(self.manual, "_save_options"):
+            self.manual._save_options(automatic_session=session)
 
     def _persist_finished(self):
         history = {
             f"{day}|{date}": value
             for (day, date), value in list(self.finished_deadlines.items())[-35:]
         }
-        self.manual._save_options(
-            finished_charge_sessions=history,
-            automatic_session={"active": False},
-        )
+        if hasattr(self.manual, "_save_options"):
+            self.manual._save_options(
+                finished_charge_sessions=history,
+                automatic_session={"active": False},
+            )
 
     async def async_restore(self):
         """Restore session ownership, never send an unconditional START.
@@ -370,6 +372,10 @@ class AutomaticChargeController:
         # This is a deliberately new authorised session. It must not be
         # mistaken for a delayed rebound from a previous STOP.
         self.stop_watch_until = None
+        # Symmetric ownership transfer: a prior manual STOP watchdog must not
+        # cancel a newly authorised automatic charge.
+        if hasattr(self.manual, "stop_watch_until"):
+            self.manual.stop_watch_until = None
         self.owned = True
         self.owned_target = plan.target
         self.owned_day = plan.day
