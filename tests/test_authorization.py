@@ -31,7 +31,7 @@ class AuthorizationTests(unittest.TestCase):
         )
 
     def test_next_morning_charging_window(self):
-        d = auth.decide(**(self.params | {"now": self.now + timedelta(hours=5)}))
+        d = auth.decide(**(self.params | {"now": self.now + timedelta(hours=6)}))
         self.assertEqual(d.action, "START")
         self.assertEqual(d.target, 80)
         self.assertEqual(d.day, "monday")
