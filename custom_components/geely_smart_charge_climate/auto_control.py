@@ -310,6 +310,16 @@ class AutomaticChargeController:
                     await self._request_stop("Charge start not confirmed in three minutes")
                 return
 
+            # Emergency stop is an explicit safety instruction, not merely
+            # an unauthorised-session policy. It may stop home charging even
+            # when the current session wasn't started by this controller.
+            if self._raw(EMERGENCY_STOP) == "on":
+                if self.mode == "Active" and self._home() is True and self._charging():
+                    await self._request_stop("Emergency stop requested")
+                else:
+                    self._update("BLOCKED", "Emergency stop active; starts suppressed")
+                return
+
             # Never command while a manual test is armed or owns the vehicle.
             policy = self._policy()
             self.decision = policy
