@@ -25,29 +25,47 @@ def schedule_card(day: str, entity_ids: dict[str, str]) -> dict:
 
 
 def comfort_cards(entity_ids: dict[str, str]) -> list[dict]:
-    """Native cards for local comfort preferences only."""
+    """Comfort controls resembling the original EV Control Centre.
+
+    Temperature uses a slider, seats use named dropdowns, steering heat and
+    visibility use switches. Everything here edits preferences only.
+    """
     result = [
-        {"type": "markdown",
-         "content": "## Cabin comfort profiles\\n"
-         "**Settings only:** These sliders do not heat, cool or activate "
-         "the vehicle. Climate commands and departure schedules are not active."},
+        {
+            "type": "markdown",
+            "content": "## Cabin comfort settings\\n"
+            "**Simulation-only preferences.** Nothing here starts the climate "
+            "system or changes your existing EV automations.",
+        },
     ]
-    for profile in ("warm", "cool"):
+    for profile in ("cool", "warm"):
+        show = entity_ids[f"show_{profile}_settings"]
         result.append({
             "type": "entities",
-            "title": f"{profile.title()} profile",
+            "title": f"Comfort {profile.title()} — expand settings",
             "show_header_toggle": False,
             "entities": [
-                {"entity": entity_ids[f"{profile}_{field}"], "name": label}
-                for field, label in (
-                    ("temperature", "Cabin temperature"),
-                    ("driver_seat_heat", "Driver seat heating"),
-                    ("passenger_seat_heat", "Passenger seat heating"),
-                    ("driver_seat_vent", "Driver seat ventilation"),
-                    ("passenger_seat_vent", "Passenger seat ventilation"),
-                    ("steering_heat", "Steering wheel heating"),
-                )
+                {"entity": show, "name": f"Show {profile.title()} settings"},
             ],
+        })
+        result.append({
+            "type": "conditional",
+            "conditions": [{"entity": show, "state": "on"}],
+            "card": {
+                "type": "entities",
+                "title": f"{profile.title()} profile",
+                "show_header_toggle": False,
+                "entities": [
+                    {"entity": entity_ids[f"{profile}_temperature"],
+                     "name": "Cabin temperature"},
+                    {"entity": entity_ids[f"{profile}_driver_seat_mode"],
+                     "name": "Driver seat"},
+                    {"entity": entity_ids[f"{profile}_passenger_seat_mode"],
+                     "name": "Passenger seat"},
+                    {"entity": entity_ids[f"{profile}_steering_toggle"],
+                     "name": "Steering wheel heating"},
+                ],
+            },
         })
     return result
 
