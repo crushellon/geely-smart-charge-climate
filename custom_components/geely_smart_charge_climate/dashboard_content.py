@@ -298,9 +298,10 @@ def dashboard_config(
         {"type": "markdown", "content": "### Charging telemetry\n" + power_details},
         {"type": "markdown", "content":
          "**Testing limitation:** Automatic charging currently requires re-enabling "
-         "after a Home Assistant restart; unattended restart recovery is not "
-         "yet complete. Public charging mode must be ON for public sessions. "
-         "Linked and independent climate schedules do not yet send commands."},
+         "and the saved automatic-charging preference are restored after a "
+         "Home Assistant restart, subject to safety interlocks. Public "
+         "charging mode must be ON for public sessions. Climate schedules "
+         "send cabin commands independently from charging."},
     ]
 
     stats_cards = [
