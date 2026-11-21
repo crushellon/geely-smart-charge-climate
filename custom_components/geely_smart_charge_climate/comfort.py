@@ -28,17 +28,20 @@ DEFAULTS = {
 STORAGE_KEY = "comfort_profiles"
 
 
-def validate_field(field: str, value: float) -> int:
-    """Accept only whole-number ranges supported by this profile model."""
+def validate_field(field: str, value: float) -> int | float:
+    """Accept half-degree temperature and integer comfort levels."""
     if field not in FIELDS:
         raise ValueError("Unsupported climate preference")
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("Invalid comfort value")
-    if not float(value).is_integer():
-        raise ValueError("Comfort controls use integer values")
+    if field == "temperature":
+        if (float(value) * 2) % 1 != 0:
+            raise ValueError("Cabin temperature must use half-degree steps")
+    elif not float(value).is_integer():
+        raise ValueError("Comfort levels must be whole numbers")
     if not FIELDS[field]["min"] <= value <= FIELDS[field]["max"]:
         raise ValueError("Comfort value outside allowed range")
-    return int(value)
+    return float(value) if field == "temperature" else int(value)
 
 
 def get_value(options: dict, profile: str, field: str) -> int:
