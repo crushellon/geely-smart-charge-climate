@@ -149,8 +149,10 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.services.calls, ["turn_on"])
 
     async def test_optional_wallbox_power_prevents_false_automatic_stop(self):
-        self.manual._wallbox_kw = lambda: 6.89
+        self.manual._wallbox_kw = lambda: 0.0
         await self.auto.async_set_mode("Active")
+        # The wallbox is now flowing, and may lag the Geely OFF response.
+        self.manual._wallbox_kw = lambda: 6.89
         self.values["sensor.battery"] = "80"
         await self.auto.async_tick()
         await self.auto.async_tick()
