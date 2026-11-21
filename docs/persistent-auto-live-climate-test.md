@@ -36,7 +36,7 @@ Optional wallbox telemetry is **display-only**.
 7. **Automatic charging enabled defaults OFF only if no previous persistent
    preference exists** (as on an upgrade from v0.3.10). Turn it ON once if
    you want automatic scheduling. The setting is thereafter remembered.
-7. Check Emergency Stop is released and Public Charging Mode OFF *only for
+8. Check Emergency Stop is released and Public Charging Mode OFF *only for
    home charging*. At a public charger, turn Public Charging Mode ON *before*
    charging; never use it as a stop button.
 
