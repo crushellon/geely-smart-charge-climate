@@ -57,6 +57,7 @@ class DiscoveryStaticTests(unittest.TestCase):
                        for n in ast.walk(node))
         self.assertTrue(auto_tick_present(periodic))
         self.assertTrue(auto_tick_present(options_changed))
+        self.assertIn("self._notify()", ast.unparse(options_changed))
         source = ast.unparse(listening)
         self.assertIn("add_update_listener(options_changed)", source)
         self.assertIn("entities.append(self.plug)", source)
