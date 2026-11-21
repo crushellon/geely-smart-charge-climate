@@ -29,6 +29,10 @@ class DashboardTests(unittest.TestCase):
                 "driver_seat_vent", "passenger_seat_vent", "steering_heat",
             ):
                 self.ids[f"{profile}_{field}"] = f"number.{profile}_{field}"
+            for occupant in ("driver", "passenger"):
+                self.ids[f"{profile}_{occupant}_seat_mode"] = f"select.{profile}_{occupant}_seat_mode"
+            self.ids[f"{profile}_steering_toggle"] = f"switch.{profile}_steering_toggle"
+            self.ids[f"show_{profile}_settings"] = f"switch.show_{profile}_settings"
         self.config = module.dashboard_config(
             self.ids, "sensor.my_geely_ex5_4034_battery",
             "binary_sensor.my_geely_ex5_4034_charger_plug",
@@ -43,11 +47,16 @@ class DashboardTests(unittest.TestCase):
 
     def test_climate_comfort_controls(self):
         climate = self.config["views"][1]["cards"]
-        self.assertEqual(len(climate), 3)
-        self.assertIn("number.warm_temperature",
-                      [item["entity"] for item in climate[1]["entities"]])
-        self.assertIn("number.cool_driver_seat_vent",
-                      [item["entity"] for item in climate[2]["entities"]])
+        self.assertEqual(len(climate), 5)
+        self.assertEqual(climate[2]["type"], "conditional")
+        self.assertEqual(climate[4]["type"], "conditional")
+        cool = [item["entity"] for item in climate[2]["card"]["entities"]]
+        warm = [item["entity"] for item in climate[4]["card"]["entities"]]
+        self.assertIn("number.cool_temperature", cool)
+        self.assertIn("select.cool_driver_seat_mode", cool)
+        self.assertIn("select.warm_passenger_seat_mode", warm)
+        self.assertIn("switch.warm_steering_toggle", warm)
+        self.assertEqual(climate[2]["conditions"][0]["entity"], "switch.show_cool_settings")
 
     def test_seven_editable_day_cards(self):
         schedule = self.config["views"][2]["cards"]
@@ -70,7 +79,7 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(len(result["views"]), 4)
 
     def test_uses_only_native_cards(self):
-        native = {"markdown", "gauge", "entities", "entity", "history-graph"}
+        native = {"markdown", "gauge", "entities", "entity", "history-graph", "conditional"}
         for view in self.config["views"]:
             for card in view["cards"]:
                 self.assertIn(card["type"], native)
