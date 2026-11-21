@@ -1,6 +1,6 @@
 """Geely Smart Charge & Climate.
 
-Passive schedules with an explicitly armed manual live-charging test.
+Persisted automatic Geely charging with real weekly scheduled preconditioning.
 """
 import logging
 
