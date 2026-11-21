@@ -36,6 +36,7 @@ async def async_setup_entry(
         GeelySimulationSensor(hass, entry),
         ClimateNextSessionSensor(hass, entry),
         LiveTestStatusSensor(entry),
+        AutomaticChargeStatusSensor(entry),
     ])
 
 
@@ -315,6 +316,55 @@ class LiveTestStatusSensor(SensorEntity):
             "legacy_automation_state": live._raw("binary_sensor.ev_legacy_charging_controllers_active"),
             "public_charging_mode": live._raw("input_boolean.ev_public_charging_mode"),
             "preflight": live.preflight(),
+        }
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self.async_on_remove(self.entry.runtime_data.listen(self.async_write_ha_state))
+
+
+class AutomaticChargeStatusSensor(SensorEntity):
+    """Auditable authorisation decisions and command verification status."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Automatic charging decision"
+    _attr_icon = "mdi:shield-alert-outline"
+
+    def __init__(self, entry):
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_automatic_charge_decision"
+
+    @property
+    def native_value(self):
+        return self.entry.runtime_data.auto.status
+
+    @property
+    def extra_state_attributes(self):
+        auto = self.entry.runtime_data.auto
+        decision = auto.decision
+        return {
+            "mode": auto.mode,
+            "message": auto.message,
+            "decision": decision.action if decision else None,
+            "reason": decision.reason if decision else None,
+            "schedule_day": decision.day if decision else None,
+            "scheduled_target": decision.target if decision else None,
+            "estimated_start": decision.start_at.isoformat()
+                               if decision and decision.start_at else None,
+            "ready_by": decision.ready_by.isoformat()
+                        if decision and decision.ready_by else None,
+            "home_wall_connector": auto._raw("binary_sensor.tesla_wall_connector_vehicle_connected"),
+            "home_confirmed": auto._home() is True,
+            "vehicle_charging": auto._raw(auto.manual.charging_switch),
+            "charging_power_kw": auto._power(),
+            "battery_percent": auto._soc(),
+            "owns_automatic_session": auto.owned,
+            "active_target": auto.owned_target,
+            "stop_attempts": auto.stop_attempts,
+            "stop_confirmation_pending": auto.stop_requested_at is not None,
+            "last_event": auto.last_event,
+            "restarts_disarm_controller": True,
+            "climate_commands_enabled": False,
         }
 
     async def async_added_to_hass(self):
