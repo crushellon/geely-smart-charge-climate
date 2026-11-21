@@ -15,7 +15,7 @@ from homeassistant.components import persistent_notification
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers import entity_registry as er
 
-from .authorization import ChargeDecision, decide
+from .authorization import ChargeDecision, charge_start_at, decide
 from .weekly_schedule import validate_day
 from .live_safety import (
     LEGACY_CONTROLLER, LEGACY_ACTIVE, OLD_FULL_CHARGE,
@@ -189,7 +189,9 @@ class AutomaticChargeController:
                 or soc is None or plan.target is None or soc >= plan.target):
             return False
         if (deliberate or plan.target > previous["target"]
-                or previous["outcome"] == "disabled"):
+                or previous["outcome"] == "disabled"
+                or (previous["outcome"] == "deferred"
+                    and plan.action == "START")):
             del self.finished_deadlines[key]
             return True
         return False
@@ -243,6 +245,12 @@ class AutomaticChargeController:
                     "COMPLETED",
                     "Scheduled target already achieved for this departure; "
                     "increase target to request more charging",
+                    plan,
+                )
+            elif previous["outcome"] == "deferred":
+                self._update(
+                    "WAITING",
+                    "Schedule was edited: waiting for revised charge window",
                     plan,
                 )
             else:
@@ -330,6 +338,7 @@ class AutomaticChargeController:
             outcome = (
                 "completed" if reached_target
                 else "disabled" if self.stop_context == "Scheduled charge disabled while running"
+                else "deferred" if self.stop_context == "Schedule revised; charging not yet needed"
                 else "interrupted" if state == "INTERRUPTED"
                 else "cancelled"
             )
@@ -377,6 +386,36 @@ class AutomaticChargeController:
                    deadline != self.owned_deadline)
         self.owned_target = settings["target"]
         self.owned_deadline = deadline
+
+        if changed:
+            soc = self._soc()
+            # Only an explicit battery-target or ready-time edit can defer an
+            # owned charge. Never pause because ordinary SoC updates move the
+            # dynamically estimated start time. Continue an already-started
+            # session otherwise; this avoids stop/start oscillation.
+            if soc is not None and soc < self.owned_target:
+                planned_start = charge_start_at(
+                    deadline, target=self.owned_target, soc=soc,
+                    rate_kw=self._effective_kw(),
+                    capacity_kwh=DEFAULT_USABLE_CAPACITY_KWH,
+                )
+                if planned_start > dt_util.now():
+                    revised = ChargeDecision(
+                        action="WAIT",
+                        reason="Revised schedule starts later; stopping until needed",
+                        day=self.owned_day, target=self.owned_target,
+                        start_at=planned_start, ready_by=deadline,
+                    )
+                    self._update(
+                        "WAITING",
+                        f"Schedule revised: charging needed from "
+                        f"{planned_start.strftime('%H:%M')}",
+                        revised,
+                    )
+                    await self._request_stop(
+                        "Schedule revised; charging not yet needed"
+                    )
+                    return False
 
         active_decision = ChargeDecision(
             action="AUTHORISED",
@@ -535,6 +574,12 @@ class AutomaticChargeController:
                         self._update(
                             "COMPLETED", "Scheduled target already achieved "
                             "for this departure; no repeat start", policy,
+                        )
+                    elif previous["outcome"] == "deferred":
+                        self._update(
+                            "WAITING",
+                            "Schedule revised; waiting for its new start time",
+                            policy,
                         )
                     else:
                         self._update(
