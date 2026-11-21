@@ -1,4 +1,4 @@
-"""Explicitly enabled EX5 home charging schedule and authorisation guard.
+"""Explicitly enabled EX5 charging scheduler and authorisation guard.
 
 Three modes: Off (default after every HA restart), Monitor (decisions only),
 Active (real ON/OFF commands after interlocks). All commands use the same
@@ -23,7 +23,6 @@ from .live_safety import (
 from .const import DOMAIN, DEFAULT_EFFECTIVE_KW, DEFAULT_USABLE_CAPACITY_KWH
 
 _LOGGER = logging.getLogger(__name__)
-HOME_WALL_CONNECTOR = "binary_sensor.tesla_wall_connector_vehicle_connected"
 MODES = ("Off", "Monitor", "Active")
 INTERLOCKS = (
     LEGACY_CONTROLLER, LEGACY_ACTIVE, OLD_FULL_CHARGE,
@@ -63,13 +62,12 @@ class AutomaticChargeController:
     def _raw(self, name):
         return self.manual._raw(name)
 
-    def _home(self):
-        """'on' is essential. Geely plug alone is NOT proof of home."""
-        if self._raw(HOME_WALL_CONNECTOR) == "on":
-            return True
-        if self._raw(HOME_WALL_CONNECTOR) == "off":
-            return False
-        return None
+    def _public_mode(self):
+        """User-operated public charging boundary, including legacy helper."""
+        return (
+            self.entry.options.get("public_charging_mode", False) is True
+            or self._raw(PUBLIC_MODE) == "on"
+        )
 
     def _power(self):
         if not self.manual.charging_power:
@@ -94,8 +92,10 @@ class AutomaticChargeController:
 
     def _stopped(self):
         power = self._power()
+        # The Geely charging switch is mandatory; Geely power is optional.
+        # Where valid power is present, require corroboration.
         return self._raw(self.manual.charging_switch) == "off" and (
-            power is not None and power <= 0.25
+            power is None or power <= 0.25
         )
 
     def _legacy_clear(self):
@@ -155,11 +155,10 @@ class AutomaticChargeController:
             now=dt_util.now(),
             schedule=self.entry.options.get("weekly_schedule", {}),
             soc=self._soc(), charging=self._charging(),
-            at_home=self._home(),
             plugged=self._raw(self.manual.plug) == "on" if self.manual.plug else None,
             rate_kw=self._effective_kw(),
             capacity_kwh=DEFAULT_USABLE_CAPACITY_KWH,
-            public_mode=self._raw(PUBLIC_MODE) == "on",
+            public_mode=self._public_mode(),
             emergency=self._raw(EMERGENCY_STOP) == "on",
             legacy_clear=self._legacy_clear(),
             manual_owned=self.manual.owned or self.manual.armed,
@@ -172,9 +171,11 @@ class AutomaticChargeController:
             self.mode = mode
             self.unexpected_since = None
             if self.owned and mode != "Active":
-                # User disabled this controller: explicit cancellation of
-                # an owned session, including a full-charge request.
-                await self._request_stop("Automatic control disabled by user")
+                # Never stop a public charge, even on a mode change.
+                if self._public_mode():
+                    self._release("BLOCKED", "Public charging mode; session released")
+                else:
+                    await self._request_stop("Automatic control disabled by user")
             elif self.stop_requested_at is None:
                 self._update(
                     "OFF" if mode == "Off" else "MONITORING",
@@ -187,18 +188,15 @@ class AutomaticChargeController:
             await self.async_tick()
 
     async def _request_start(self, plan):
-        """Issue one start only after positive safety and home verification."""
+        """Start only when Geely telemetry and user-operated guards permit."""
         if self.mode != "Active" or self.manual.armed or self.manual.owned:
             return
         deadline_key = (plan.day, plan.ready_by.isoformat())
         if deadline_key in self.completed_deadlines:
             self._update("COMPLETED", "This scheduled charging session already ended")
             return
-        if not self._legacy_clear() or self._home() is not True:
-            self._update("BLOCKED", "Cannot start: controller/home interlock")
-            return
-        if self._power() is None:
-            self._update("BLOCKED", "Cannot start: charging power unavailable")
+        if self._public_mode() or not self._legacy_clear():
+            self._update("BLOCKED", "Cannot start: public mode or safety interlock")
             return
         reason = start_preflight(
             armed=True, battery=self._raw(self.manual.battery),
@@ -210,7 +208,8 @@ class AutomaticChargeController:
         if reason:
             self._update("BLOCKED", reason)
             return
-        if self._power() > 0.25:
+        power = self._power()
+        if power is not None and power > 0.25:
             self._update("BLOCKED", "Charging power already flowing")
             return
         self.owned = True
@@ -236,7 +235,11 @@ class AutomaticChargeController:
         self._update("CHARGING", f"Scheduled charge requested: {plan.target}%")
 
     async def _request_stop(self, reason):
-        """Keep stop ownership until positive switch AND power confirmation."""
+        """Keep stop ownership until Geely confirms a stopped state."""
+        if self._public_mode():
+            # The user has designated this a public session; do not send OFF.
+            self._release("BLOCKED", "Public mode enabled; stop command suppressed")
+            return
         if self.stop_requested_at is None:
             self.stop_attempts = 0
         self.stop_requested_at = dt_util.utcnow()
@@ -271,9 +274,18 @@ class AutomaticChargeController:
         self._update(state, message)
 
     async def async_tick(self):
-        """Decide, log, and (only when Active) act on home charging."""
+        """Decide, log, and (only when Active) act on non-public charging."""
         async with self._lock:
             if self.mode == "Off" and self.stop_requested_at is None:
+                return
+
+            # A public-mode change must block ALL further automatic commands,
+            # including pending stop retries and emergency interventions.
+            if self._public_mode():
+                if self.owned or self.stop_requested_at is not None:
+                    self._release("BLOCKED", "Public mode enabled; ownership released")
+                else:
+                    self._update("BLOCKED", "Public charging mode; commands suppressed")
                 return
 
             # Confirmation/retry must run even after the user disables active
@@ -287,24 +299,13 @@ class AutomaticChargeController:
                     return
                 elapsed = dt_util.utcnow() - self.stop_requested_at
                 if elapsed >= STOP_RETRY:
-                    if self.stop_attempts < 3 and self._home() is True:
+                    if self.stop_attempts < 3:
                         await self._request_stop("Retrying unconfirmed stop")
                     else:
                         self._update("ERROR", "Stop not verified; check vehicle immediately")
                         self._notice("error", "Automatic stop remains unconfirmed")
                 return
 
-            # If a commanded session moves away from the recognised wall
-            # connector, release it without a command; never stop public charge.
-            if self.owned and self._home() is not True:
-                self._release("UNKNOWN", "Home charger no longer confirmed; no command sent")
-                return
-            if self._raw(PUBLIC_MODE) == "on":
-                if self.owned:
-                    self._release("BLOCKED", "Public charging mode: released control")
-                else:
-                    self._update("BLOCKED", "Public charging mode; no home control")
-                return
             if self.owned:
                 # A latched session remains authorised after the calculated
                 # start time shifts with rising SOC and after ready-by.
@@ -344,12 +345,11 @@ class AutomaticChargeController:
                     await self._request_stop("Charge start not confirmed in three minutes")
                 return
 
-            # Emergency stop is an explicit safety instruction, not merely
-            # an unauthorised-session policy. It may stop home charging even
-            # when the current session wasn't started by this controller.
+            # Emergency stop can intervene in an observed charging session
+            # only while the user has NOT designated public charging mode.
             if self._raw(EMERGENCY_STOP) == "on":
                 if (self.mode == "Active" and not self.manual.owned
-                        and self._home() is True and self._charging()):
+                        and self._charging()):
                     await self._request_stop("Emergency stop requested")
                 else:
                     self._update("BLOCKED", "Emergency stop active; starts suppressed")
@@ -373,10 +373,10 @@ class AutomaticChargeController:
                 await self._request_start(policy)
                 return
             if policy.action == "STOP":
-                # An unauthorised charge is NOT our session. Confirm home and
-                # stable charging for 30 seconds before intervening.
-                if self._home() is not True or not self._legacy_clear():
-                    self._update("BLOCKED", "Cannot intervene without clear home interlocks")
+                # User owns the public/home declaration. Wait for stable
+                # unexpected charging before intervening.
+                if not self._legacy_clear():
+                    self._update("BLOCKED", "Cannot intervene with safety interlocks active")
                     return
                 if self.unexpected_since is None:
                     self.unexpected_since = dt_util.utcnow()
@@ -394,13 +394,15 @@ class AutomaticChargeController:
         """Unload safely. No unattended charge control survives restart."""
         if self.owned or self.stop_requested_at is not None:
             async with self._lock:
-                if self.owned and self.owned_target == 100:
+                if self._public_mode():
+                    self._release("BLOCKED", "Public mode enabled during unload")
+                elif self.owned and self.owned_target == 100:
                     # A Home Assistant reload is not a user request to cancel
                     # 100% charging. Let Geely finish the session itself.
                     self._release(
                         "OFF", "Home Assistant unloaded; 100% termination left to Geely"
                     )
-                elif self._home() is True and self._charging():
+                elif self._charging():
                     await self._request_stop("Integration unloading")
         self.mode = "Off"
         self.manual._notify()
