@@ -19,7 +19,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         + [ClimateSlotEnabled(hass, entry, slot, 'enabled') for slot in SLOTS]
         + [ClimateSlotEnabled(hass, entry, slot, 'steering_heat') for slot in SLOTS]
         + [ChargingLinkedComfortSwitch(hass, entry, day) for day in DAY_NAMES]
-        + [LiveTestArmSwitch(entry)]
+        + [LiveTestArmSwitch(entry), PublicChargingModeSwitch(hass, entry)]
     )
 
 
@@ -174,3 +174,39 @@ class LiveTestArmSwitch(SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         await self.entry.runtime_data.async_arm(False)
+
+class PublicChargingModeSwitch(SwitchEntity):
+    """User-declared public charging. Never infer vehicle location.
+
+    Persists across restarts. The legacy public-mode helper, if installed,
+    remains an additional interlock until users migrate it.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Public charging mode"
+    _attr_icon = "mdi:ev-station"
+
+    def __init__(self, hass, entry):
+        self.hass = hass
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_public_charging_mode"
+
+    @property
+    def is_on(self):
+        return self.entry.options.get("public_charging_mode", False) is True
+
+    async def _save(self, enabled):
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            options={**self.entry.options, "public_charging_mode": enabled},
+        )
+        self.async_write_ha_state()
+        # Reconcile immediately, without waiting for the periodic tick.
+        await self.entry.runtime_data.async_tick()
+        await self.entry.runtime_data.auto.async_tick()
+
+    async def async_turn_on(self, **kwargs):
+        await self._save(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self._save(False)
