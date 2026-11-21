@@ -18,6 +18,7 @@ from .const import CONF_BATTERY_ENTITY, CONF_CHARGING_SWITCH, CONF_CHARGING_POWE
 from .discovery import discover_plug_entity, discover_charging_power_entity
 from .auto_control import AutomaticChargeController
 from .manual_climate import ManualClimateController
+from .scheduled_climate import ScheduledClimateController
 from .live_safety import (
     EMERGENCY_STOP, LEGACY_ACTIVE, LEGACY_CONTROLLER, OLD_FULL_CHARGE,
     PUBLIC_MODE, start_preflight, should_stop_owned_session,
@@ -48,6 +49,7 @@ class LiveChargeController:
         self.target = 80  # Requested next manual test; not a scheduled target.
         self.active_target = None
         self.started_at = None
+        self._manual_recovery_started = None
         self.observed_active = False
         self.stop_requested_at = None
         self.stop_started_at = None
@@ -62,6 +64,8 @@ class LiveChargeController:
         self._unsubs = []
         self.auto = AutomaticChargeController(self)
         self.climate = ManualClimateController(hass, entry, self._notify)
+        self.scheduled_climate = ScheduledClimateController(self)
+        self._manual_recovery_started = None
 
     def listen(self, callback_fn):
         self._callbacks.append(callback_fn)
@@ -166,6 +170,7 @@ class LiveChargeController:
                 except (KeyError, TypeError, ValueError):
                     self.started_at = dt_util.utcnow()
                 self.observed_active = False
+                self._manual_recovery_started = dt_util.utcnow()
                 self.status = "RECOVERING"
                 self.message = "Recovering manual charge; no duplicate START"
                 self._notify()
@@ -283,6 +288,7 @@ class LiveChargeController:
             self._notify()
 
     async def async_manual_climate(self, action):
+        await self.scheduled_climate.async_manual_override(action)
         await self.climate.apply(action)
 
     async def async_resume_schedule(self):
@@ -456,7 +462,11 @@ class LiveChargeController:
             if self.public_mode():
                 self.stop_watch_until = None
             if self.stop_watch_until is not None and not self.owned:
-                if dt_util.utcnow() >= self.stop_watch_until:
+                if self.auto.owned:
+                    # A new, authorised automatic charge supersedes the old
+                    # manual cancellation watchdog; never stop that session.
+                    self.stop_watch_until = None
+                elif dt_util.utcnow() >= self.stop_watch_until:
                     self.stop_watch_until = None
                 elif (self._raw(self.charging_switch) == "on"
                       or self._power_active()):
@@ -502,6 +512,34 @@ class LiveChargeController:
                 await self._stop_locked("Safety interlock activated")
                 return
 
+            if self._manual_recovery_started is not None:
+                if self._raw(self.charging_switch) == "on" or self._power_active():
+                    self.observed_active = True
+                    self._manual_recovery_started = None
+                elif dt_util.utcnow() - self._manual_recovery_started < timedelta(seconds=90):
+                    self.status = "RECOVERING"
+                    self.message = "Checking prior manual charge; no duplicate START"
+                    self._notify()
+                    return
+                else:
+                    raw_soc = self._raw(self.battery)
+                    try:
+                        restored_soc = float(raw_soc)
+                    except (TypeError, ValueError):
+                        restored_soc = None
+                    if (restored_soc is None
+                            or self._raw(self.charging_switch) not in ("on", "off")):
+                        self.status = "RECOVERING"
+                        self.message = "Cannot classify old charge until Geely refreshes"
+                        self._notify()
+                        return
+                    if restored_soc >= self.active_target or (
+                            self.active_target == 100 and restored_soc >= 99):
+                        self._finish("COMPLETED", "Previous manual charge finished in vehicle")
+                    else:
+                        self._finish("INTERRUPTED", "Previous manual charge ended below target")
+                    return
+
             raw = self._raw(self.battery)
             try:
                 soc = float(raw)
@@ -529,7 +567,12 @@ class LiveChargeController:
                 await self._stop_locked("Charge did not confirm after 3 minutes")
                 return
             if self.observed_active and self.off_observations >= 2 and elapsed >= timedelta(seconds=60):
-                self._finish("COMPLETED", "Geely reports charging ended")
+                if soc is not None and (
+                        soc >= self.active_target
+                        or (self.active_target == 100 and soc >= 99)):
+                    self._finish("COMPLETED", "Geely ended charge at target")
+                else:
+                    self._finish("INTERRUPTED", "Geely ended manual charge below target")
                 return
 
     async def async_shutdown(self):
