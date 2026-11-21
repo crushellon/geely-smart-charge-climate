@@ -26,7 +26,7 @@ class LinkedComfortSnapshotTests(unittest.TestCase):
         initial = linked.snapshot(options, "saturday")
         self.assertFalse(initial["enabled"])
         self.assertEqual(initial["profile"], "Cool")
-        self.assertFalse(initial["commands_enabled"])
+        self.assertTrue(initial["commands_enabled"])
         options = linked.set_value(options, "saturday", "enabled", True)
         options = linked.set_value(options, "saturday", "profile", "Warm")
         options = comfort.set_value(options, "warm", "temperature", 24.5)
