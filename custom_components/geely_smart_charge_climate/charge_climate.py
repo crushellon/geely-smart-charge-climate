@@ -51,3 +51,27 @@ def set_timing(options: dict, field: str, value) -> dict:
         raise ValueError("Timing must be 0–120 whole minutes")
     existing = options.get(TIMING_KEY, {})
     return {**options, TIMING_KEY: {**existing, field: int(value)}}
+
+def snapshot(options: dict, day: str) -> dict:
+    """Read the current charging-linked comfort configuration for diagnostics.
+
+    Configuration only: this does not run climate or send vehicle commands.
+    Both the active session and dashboard read fresh persisted settings.
+    """
+    from .comfort import get_value as get_profile_value
+    from .comfort_display import get_seat_mode
+
+    enabled = get_value(options, day, "enabled")
+    profile = get_value(options, day, "profile")
+    selected = profile.lower()
+    return {
+        "enabled": enabled,
+        "profile": profile,
+        "temperature": get_profile_value(options, selected, "temperature"),
+        "driver_seat": get_seat_mode(options, selected, "driver"),
+        "passenger_seat": get_seat_mode(options, selected, "passenger"),
+        "steering_heat": bool(get_profile_value(options, selected, "steering_heat")),
+        "lead_minutes": get_timing(options, "lead_minutes"),
+        "hold_minutes": get_timing(options, "hold_minutes"),
+        "commands_enabled": False,
+    }
