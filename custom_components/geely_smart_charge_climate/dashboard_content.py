@@ -92,15 +92,14 @@ def independent_climate_schedule_cards(entity_ids: dict[str, str]) -> list[dict]
 
 
 def charging_schedule_card(entity_ids: dict[str, str]) -> dict:
-    """One weekly schedule aligned to the night-before / ready-next-day model."""
+    """Ready-by day/time schedules; starts need not be overnight."""
     rows = []
-    for index, day in enumerate(DAYS):
-        previous = DAYS[(index - 1) % 7].title()
+    for day in DAYS:
         rows.extend([
-            {"type": "section", "label": f"{previous} night → {day.title()}"},
+            {"type": "section", "label": f"{day.title()} — ready-by deadline"},
             {"entity": entity_ids[f"{day}_enabled"], "name": "Schedule enabled"},
-            {"entity": entity_ids[f"{day}_target"], "name": "Finish battery %"},
-            {"entity": entity_ids[f"{day}_ready_time"], "name": "Ready by (next morning)"},
+            {"entity": entity_ids[f"{day}_target"], "name": "Battery target %"},
+            {"entity": entity_ids[f"{day}_ready_time"], "name": "Ready by (any time)"},
             {"entity": entity_ids[f"{day}_linked_comfort_enabled"],
              "name": "Cabin comfort enabled"},
             {"entity": entity_ids[f"{day}_linked_comfort_profile"],
@@ -284,9 +283,10 @@ def dashboard_config(
         {
             "type": "markdown",
             "content": "## Weekly charging schedule\n"
-            "Set the day the vehicle needs to be **ready**, the battery target, "
-            "and the time. These controls affect the **simulation only**. "
-            "No charging commands will be sent.",
+            "Choose the **day and time the battery must be ready**, not when "
+            "charging starts. Evenings and shift-work deadlines are supported. "
+            "Charging may begin earlier on the same day or the previous day. "
+            "Monitor makes no commands; Active enables automatic control.",
         },
         *[schedule_card(day, entity_ids) for day in DAYS],
     ]
