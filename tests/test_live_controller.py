@@ -209,12 +209,46 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.controller.async_resume_schedule()
         self.assertEqual(self.controller.auto.mode, "Active")
 
+    async def test_product_manual_stop_rejects_early_cloud_confirmation(self):
+        real_utc = env["dt_util"].utcnow
+        real_settle = env["MANUAL_STOP_SETTLE"]
+        clock = {"now": datetime.now(timezone.utc)}
+        env["dt_util"].utcnow = lambda: clock["now"]
+        env["MANUAL_STOP_SETTLE"] = timedelta(seconds=30)
+        self.addCleanup(setattr, env["dt_util"], "utcnow", real_utc)
+        self.addCleanup(env.__setitem__, "MANUAL_STOP_SETTLE", real_settle)
+        await self.controller.async_start_manual(80)
+        await self.controller.async_stop()
+        await self.controller.async_tick()
+        await self.controller.async_tick()
+        self.assertEqual(self.controller.status, "STOP_REQUESTED")
+        clock["now"] += timedelta(seconds=31)
+        await self.controller.async_tick()
+        await self.controller.async_tick()
+        self.assertEqual(self.controller.status, "STOPPED")
+        self.assertIsNotNone(self.controller.stop_watch_until)
+
+    async def test_manual_stop_watchdog_catches_delayed_charge(self):
+        await self.controller.async_start_manual(80)
+        await self.controller.async_stop()
+        await self.controller.async_tick()
+        await self.controller.async_tick()
+        self.assertEqual(self.controller.status, "STOPPED")
+        self.states.data["switch.car"].state = "on"
+        self.states.data["sensor.power"].state = "6.8"
+        await self.controller.async_tick()
+        self.assertEqual(self.controller.status, "STOP_REQUESTED")
+        self.assertEqual(
+            [c[1] for c in self.services.calls],
+            ["turn_on", "turn_off", "turn_off"],
+        )
+
     async def test_native_emergency_stops_charge_and_latches(self):
         await self.controller.async_start_manual(80)
         self.assertTrue(self.controller.owned)
         await self.controller.async_emergency_stop()
         self.assertTrue(self.controller.entry.options["emergency_stop"])
-        self.assertEqual(self.services.calls[-1][1], "turn_off")
+        self.assertEqual([c[1] for c in self.services.calls], ["turn_on", "turn_off"])
         await self.controller.async_release_emergency_stop()
         self.assertFalse(self.controller.entry.options["emergency_stop"])
         self.assertEqual(self.controller.auto.mode, "Off")
