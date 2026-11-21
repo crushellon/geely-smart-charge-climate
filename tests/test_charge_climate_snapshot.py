@@ -44,7 +44,7 @@ class LinkedComfortSnapshotTests(unittest.TestCase):
         self.assertTrue(updated["steering_heat"])
         self.assertEqual(updated["lead_minutes"], 17)
         self.assertEqual(updated["hold_minutes"], 23)
-        self.assertTrue(updated["commands_enabled"])
+        self.assertFalse(updated["commands_enabled"])
 
     def test_enabled_schedule_uses_own_day_comfort_profile(self):
         options = linked.set_value({}, "monday", "enabled", True)
