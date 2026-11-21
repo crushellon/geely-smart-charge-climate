@@ -73,6 +73,7 @@ class DummyClimate:
 env = {
     "AutomaticChargeController": DummyAutomatic,
     "ManualClimateController": DummyClimate,
+    "ScheduledClimateController": DummyScheduledClimate,
     "MANUAL_STOP_SETTLE": timedelta(0),
     "MANUAL_STOP_WATCH": timedelta(minutes=5),
     "datetime": datetime,
