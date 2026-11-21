@@ -316,7 +316,12 @@ class LiveTestStatusSensor(SensorEntity):
             "plug_state": live._raw(live.plug),
             "legacy_controller_state": live._raw("input_boolean.ev_controller_enabled"),
             "legacy_automation_state": live._raw("binary_sensor.ev_legacy_charging_controllers_active"),
-            "public_charging_mode": live._raw("input_boolean.ev_public_charging_mode"),
+            "public_charging_mode": live.public_mode(),
+            "public_mode_source": (
+                "integration switch" if self.entry.options.get("public_charging_mode") is True
+                else "legacy helper" if live._raw("input_boolean.ev_public_charging_mode") == "on"
+                else "off"
+            ),
             "preflight": live.preflight(),
         }
 
@@ -355,8 +360,12 @@ class AutomaticChargeStatusSensor(SensorEntity):
                                if decision and decision.start_at else None,
             "ready_by": decision.ready_by.isoformat()
                         if decision and decision.ready_by else None,
-            "home_wall_connector": auto._raw("binary_sensor.tesla_wall_connector_vehicle_connected"),
-            "home_confirmed": auto._home() is True,
+            "public_charging_mode": auto._public_mode(),
+            "public_charging_interlock": (
+                "Integration switch" if self.entry.options.get("public_charging_mode") is True
+                else "Legacy helper" if auto._raw("input_boolean.ev_public_charging_mode") == "on"
+                else "Off"
+            ),
             "vehicle_charging": auto._raw(auto.manual.charging_switch),
             "charging_power_kw": auto._power(),
             "battery_percent": auto._soc(),
