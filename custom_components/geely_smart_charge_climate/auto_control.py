@@ -7,7 +7,7 @@ selected Geely switch as the successful attended manual test.
 Do not enable unattended charging until integration/restart recovery is proven.
 """
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 from math import isfinite
 import logging
 
@@ -31,6 +31,8 @@ INTERLOCKS = (
 )
 UNEXPECTED_GRACE = timedelta(seconds=30)
 STOP_RETRY = timedelta(seconds=30)
+STOP_SETTLE = timedelta(seconds=30)
+STOP_WATCH = timedelta(minutes=5)
 
 
 class AutomaticChargeController:
@@ -44,6 +46,11 @@ class AutomaticChargeController:
         self.status = "OFF"
         self.message = "Automatic controller is off"
         self.decision = None
+        if state == "STOPPED" and self.stop_started_at is not None:
+            # A delayed start may arrive AFTER apparently valid stop
+            # feedback. Continue watching only this integration-owned
+            # cancellation for a bounded period, even while mode is Off.
+            self.stop_watch_until = dt_util.utcnow() + STOP_WATCH
         self.owned = False
         self.owned_target = None
         self.owned_day = None
@@ -53,6 +60,8 @@ class AutomaticChargeController:
         self.off_checks = 0
         self.unexpected_since = None
         self.stop_requested_at = None
+        self.stop_started_at = None
+        self.stop_watch_until = None
         self.stop_attempts = 0
         self.stop_context = ""
         self.last_event = "No automatic charging action"
@@ -93,12 +102,37 @@ class AutomaticChargeController:
         power = self._power()
         return state == "on" or (power is not None and power > 0.25)
 
+    def _stop_telemetry_fresh(self):
+        """Never verify STOP using cached states from before the command.
+
+        Home Assistant exposes last_reported (fallback last_updated). Both
+        Geely switch and configured power must have been reported after the
+        first OFF command. Missing timestamps are *unconfirmed*, not OFF.
+        """
+        if self.stop_started_at is None:
+            return False
+        for entity_id in (self.manual.charging_switch, self.manual.charging_power):
+            if not entity_id:
+                continue
+            state = self.hass.states.get(entity_id)
+            if state is None:
+                return False
+            timestamp = (getattr(state, "last_reported", None)
+                         or getattr(state, "last_updated", None))
+            if (not isinstance(timestamp, datetime)
+                    or timestamp.tzinfo is None
+                    or timestamp < self.stop_started_at):
+                return False
+        return True
+
     def _stopped(self):
         power = self._power()
-        # The Geely charging switch is mandatory; Geely power is optional.
-        # Where valid power is present, require corroboration.
-        return self._raw(self.manual.charging_switch) == "off" and (
-            power is None or power <= 0.25
+        # Require positive post-command Geely reports. The Geely switch is
+        # mandatory; power is optional, but corroborates when configured.
+        return (
+            self._stop_telemetry_fresh()
+            and self._raw(self.manual.charging_switch) == "off"
+            and (power is None or power <= 0.25)
         )
 
     def _legacy_clear(self):
@@ -278,6 +312,9 @@ class AutomaticChargeController:
         if power is not None and power > 0.25:
             self._update("BLOCKED", "Charging power already flowing")
             return
+        # This is a deliberately new authorised session. It must not be
+        # mistaken for a delayed rebound from a previous STOP.
+        self.stop_watch_until = None
         self.owned = True
         self.owned_target = plan.target
         self.owned_day = plan.day
@@ -309,8 +346,10 @@ class AutomaticChargeController:
         if self.stop_requested_at is None:
             self.stop_attempts = 0
             self.stop_context = reason
-        # Preserve the original reason across stop retries: the completed
-        # target must not become a "cancelled" session on a retry.
+            self.stop_started_at = dt_util.utcnow()
+        # Preserve the original stop reason and first-request timestamp
+        # across retries. The latter prevents stale OFF telemetry from
+        # falsely verifying the stop.
         self.stop_requested_at = dt_util.utcnow()
         self.stop_attempts += 1
         self.off_checks = 0
@@ -354,6 +393,7 @@ class AutomaticChargeController:
         self.saw_charging = False
         self.off_checks = 0
         self.stop_requested_at = None
+        self.stop_started_at = None
         self.stop_attempts = 0
         self.stop_context = ""
         self.unexpected_since = None
@@ -442,23 +482,36 @@ class AutomaticChargeController:
     async def async_tick(self):
         """Decide, log, and (only when Active) act on non-public charging."""
         async with self._lock:
-            if self.mode == "Off" and self.stop_requested_at is None:
-                return
-
             # A public-mode change must block ALL further automatic commands,
             # including pending stop retries and emergency interventions.
             if self._public_mode():
+                self.stop_watch_until = None
                 if self.owned or self.stop_requested_at is not None:
                     self._release("BLOCKED", "Public mode enabled; ownership released")
                 else:
                     self._update("BLOCKED", "Public charging mode; commands suppressed")
                 return
 
+            # Keep watching recent integration-owned stops even when Off:
+            # a delayed Geely start can arrive AFTER initial OFF feedback.
+            if self.stop_watch_until is not None:
+                if dt_util.utcnow() >= self.stop_watch_until:
+                    self.stop_watch_until = None
+                elif self.stop_requested_at is None and self._charging():
+                    await self._request_stop(
+                        "Charging resumed after verified stop; enforcing cancellation"
+                    )
+                    return
+
+            if self.mode == "Off" and self.stop_requested_at is None:
+                return
+
             # Confirmation/retry must run even after the user disables active
             # mode, otherwise an in-flight stop could be abandoned.
             if self.stop_requested_at is not None:
                 self.off_checks = self.off_checks + 1 if self._stopped() else 0
-                if self.off_checks >= 2:
+                if (self.off_checks >= 2 and self.stop_started_at is not None
+                        and dt_util.utcnow() - self.stop_started_at >= STOP_SETTLE):
                     context = self.stop_context
                     self._release("STOPPED", f"Verified charging stopped: {context}")
                     self._notice("stop_verified", f"Charging stopped and verified: {context}")
