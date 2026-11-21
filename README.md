@@ -23,6 +23,24 @@ are still disabled in this experimental version.
 For the exact supervised tests and rollback guidance, see
 [Live schedule edit test plan](docs/live-schedule-edit-test.md).
 
+## Scheduled charge resume and completion (v0.3.6)
+
+A charging session is **complete only when the requested target has actually
+been reached**. A user cancellation or Geely charging ending before target
+must no longer be labelled COMPLETED. An unfinished session is paused rather
+than automatically restarted in a rapid loop.
+
+A **new user request** may resume that same departure day: increase the
+scheduled battery target, disable then re-enable its schedule, or deliberately
+return to **Active** from Off/Monitor after stop verification (temporary
+developer UI). Re-arming with unknown SoC or when already at target is blocked.
+Changing the clock time alone does not automatically restart a completed
+charge. All normal 100% termination remains managed by the vehicle.
+
+The final product is intended to have a dedicated **Resume schedule** control,
+not the developer Off/Monitor/Active selector. This release is still for
+attended testing; see the [session-resume test checklist](docs/session-completion-rearm-test.md).
+
 ## HACS setup and updates (custom repository)
 
 1. In Home Assistant, open **HACS**, then its menu **Custom repositories**.
