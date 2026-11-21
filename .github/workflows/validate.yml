@@ -1,0 +1,28 @@
+name: Validate development integration
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  python-and-metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Run standard-library tests
+        run: python -m unittest discover -s tests -v
+      - name: Validate Python syntax and JSON
+        run: |
+          python - <<'PY'
+          import ast
+          import json
+          from pathlib import Path
+          for path in Path("custom_components").rglob("*.py"):
+              ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+          for path in Path("custom_components").rglob("*.json"):
+              json.loads(path.read_text(encoding="utf-8"))
+          print("Integration syntax and JSON metadata valid")
+          PY
