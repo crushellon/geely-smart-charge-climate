@@ -43,6 +43,9 @@ class DummyAutomatic:
     async def async_set_mode(self, mode, deliberate=True):
         self.mode = mode
 
+    async def async_request_resume(self):
+        return None
+
     async def _request_stop(self, message):
         self.stop_requested_at = datetime.now(timezone.utc)
         await self.manual.hass.services.async_call(
