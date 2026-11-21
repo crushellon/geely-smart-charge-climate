@@ -73,5 +73,5 @@ def snapshot(options: dict, day: str) -> dict:
         "steering_heat": bool(get_profile_value(options, selected, "steering_heat")),
         "lead_minutes": get_timing(options, "lead_minutes"),
         "hold_minutes": get_timing(options, "hold_minutes"),
-        "commands_enabled": False,
+        "commands_enabled": True,
     }
