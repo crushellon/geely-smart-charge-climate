@@ -132,6 +132,20 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.auto.async_tick()
         self.assertEqual(self.auto.status, "COMPLETED")
 
+    async def test_100_survives_graceful_reload(self):
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on"])
+        await self.auto.async_shutdown()
+        self.assertEqual(self.services.calls, ["turn_on"])
+        self.assertEqual(self.auto.mode, "Off")
+
+    async def test_user_turning_off_auto_stops_its_owned_charge(self):
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_set_mode("Off")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertIsNotNone(self.auto.stop_requested_at)
+
     async def test_guard_detects_and_stops_unexpected_home_charge(self):
         self.entry.options["weekly_schedule"] = {}
         self.values["switch.car"] = "on"
