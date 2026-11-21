@@ -401,6 +401,8 @@ class LiveChargeController:
             self._notify()
             return
         await self.async_set_automatic_enabled(True)
+        if self.auto.mode == "Active":
+            await self.auto.async_request_resume()
         self._notify()
 
     async def async_start(self):
