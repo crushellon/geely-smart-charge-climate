@@ -620,20 +620,20 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
         self.assertIsNotNone(self.auto.stop_requested_at)
 
-    async def test_guard_detects_and_stops_unexpected_geely_charge(self):
+    async def test_existing_charge_without_owner_is_not_stopped_by_schedule(self):
+        # The car may already be charging from Geely/manual before an update.
+        # The finished product cannot treat the absence of a saved owner as
+        # evidence that its own START was unauthorised.
         self.entry.options["weekly_schedule"] = {}
         self.values["switch.car"] = "on"
         self.values["sensor.power"] = "6"
         await self.auto.async_set_mode("Active")
-        self.assertEqual(self.auto.status, "CHECKING")
+        self.assertEqual(self.auto.status, "EXTERNAL")
         self.assertEqual(self.services.calls, [])
-        self.auto.unexpected_since = datetime.now(timezone.utc) - timedelta(seconds=40)
-        await self.auto.async_tick()
-        self.assertEqual(self.services.calls, ["turn_off"])
         await self.auto.async_tick()
         await self.auto.async_tick()
-        self.assertEqual(self.auto.status, "STOPPED")
-        self.assertIn("Unauthorised", self.auto.message)
+        self.assertEqual(self.services.calls, [])
+        self.assertIn("origin unknown", self.auto.message)
 
     async def test_geely_only_works_without_charging_power_entity(self):
         self.manual.charging_power = None
