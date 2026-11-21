@@ -19,7 +19,7 @@ from .const import (
     DOMAIN,
 )
 from .discovery import discover_plug_entity
-from .dashboard_content import DAYS, dashboard_config, comfort_cards, independent_climate_schedule_cards
+from .dashboard_content import DAYS, dashboard_config
 from .comfort import PROFILES, FIELDS
 from .climate_schedule import SLOTS
 
@@ -41,6 +41,17 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
             f"{day}_target": ("number", f"{entry.entry_id}_{day}_target"),
             f"{day}_ready_time": ("time", f"{entry.entry_id}_{day}_ready_time"),
         })
+    for day in DAYS:
+        unique_ids[f"{day}_linked_comfort_enabled"] = (
+            "switch", f"{entry.entry_id}_{day}_linked_comfort_enabled"
+        )
+        unique_ids[f"{day}_linked_comfort_profile"] = (
+            "select", f"{entry.entry_id}_{day}_linked_comfort_profile"
+        )
+    for field in ("lead_minutes", "hold_minutes"):
+        unique_ids[f"linked_comfort_{field}"] = (
+            "number", f"{entry.entry_id}_linked_comfort_{field}"
+        )
     for profile in PROFILES:
         for field in FIELDS:
             unique_ids[f"{profile}_{field}"] = (
@@ -141,84 +152,77 @@ async def async_ensure_dashboard(hass, entry) -> None:
 
 
 async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> None:
-    """Upgrade only the untouched v0.1.4 placeholder; preserve user edits.
+    """Migrate only the integration-generated four-tab test layout.
 
-    Never replace other views, or change the Climate view if the user has
-    edited it. The user's original EV dashboard is at a different path.
+    Protect other dashboards, including the user's original EV Control Centre,
+    and leave manually modified test dashboards untouched.
     """
+    try:
+        current = await stored_dashboard.async_load(False)
+    except Exception:
+        _LOGGER.exception("Could not inspect test dashboard for safe migration")
+        return
+    if not isinstance(current, dict):
+        return
+    views = current.get("views", [])
+    if not isinstance(views, list):
+        return
+    paths = [v.get("path") for v in views]
+    if paths == ["charging", "comfort", "climate-scheduler", "data"]:
+        return
+    if paths != ["charging", "climate", "schedule", "statistics"]:
+        _LOGGER.info("Test dashboard was customized; preserving current layout")
+        return
+    charging = views[0].get("cards", [])
+    climate = views[1].get("cards", [])
+    schedule = views[2].get("cards", [])
+    if (
+        not charging or charging[0].get("type") != "markdown"
+        or "Geely Smart Charge & Climate" not in charging[0].get("content", "")
+        or not schedule or schedule[0].get("type") != "markdown"
+        or "Weekly charging schedule" not in schedule[0].get("content", "")
+    ):
+        _LOGGER.info("Test dashboard appears customized; migration skipped")
+        return
+    # Recognize only the known v0.1.7 generated Climate tab layout.
+    if (
+        len(climate) != 14
+        or climate[0].get("type") != "markdown"
+        or "Cabin comfort settings" not in climate[0].get("content", "")
+        or climate[7].get("title") != "Climate schedule 1"
+        or climate[13].get("title") != "Climate schedule 7"
+    ):
+        _LOGGER.info("Climate layout customized; preserving it")
+        return
+
     ids = _dashboard_entity_ids(hass, entry)
     if ids is None:
         return
-    try:
-        config = await stored_dashboard.async_load(False)
-    except Exception:
-        _LOGGER.exception("Could not read the existing EV test dashboard")
-        return
-    if not isinstance(config, dict):
-        return
-    views = config.get("views", [])
-    climate = next((view for view in views if view.get("path") == "climate"), None)
-    if not climate:
-        return
-    current_cards = climate.get("cards", [])
-    old_placeholder = (
-        len(current_cards) == 1
-        and current_cards[0].get("type") == "markdown"
-        and "Climate controls and heated-seat profiles will be"
-        in current_cards[0].get("content", "")
-        and "This development release cannot command"
-        in current_cards[0].get("content", "")
+    new_config = dashboard_config(
+        ids,
+        battery=entry.data[CONF_BATTERY_ENTITY],
+        plug=discover_plug_entity(hass, entry.data[CONF_BATTERY_ENTITY]),
+        charging_power=entry.data.get(CONF_CHARGING_POWER),
     )
-    old_sliders = (
-        len(current_cards) == 3
-        and current_cards[0].get("type") == "markdown"
-        and "Cabin comfort profiles" in current_cards[0].get("content", "")
-        and current_cards[1].get("type") == "entities"
-        and current_cards[1].get("title") == "Warm profile"
-        and current_cards[2].get("type") == "entities"
-        and current_cards[2].get("title") == "Cool profile"
-    )
-    original_style = (
-        len(current_cards) == 5
-        and current_cards[0].get("type") == "markdown"
-        and "Cabin comfort settings" in current_cards[0].get("content", "")
-        and [card.get("type") for card in current_cards[1:]]
-        == ["entities", "conditional", "entities", "conditional"]
-        and "expand settings" in current_cards[1].get("title", "")
-        and "expand settings" in current_cards[3].get("title", "")
-    )
-    if not (old_placeholder or old_sliders or original_style):
-        # Preserve manually edited test dashboards and any newer layout.
-        return
-    from copy import deepcopy
+    await stored_dashboard.async_save(new_config)
 
-    updated = deepcopy(config)
-    view = next(view for view in updated["views"] if view.get("path") == "climate")
-    view["cards"] = comfort_cards(ids) + independent_climate_schedule_cards(ids)
-    updated["title"] = "Geely EV Control Centre (Test)"
-    await stored_dashboard.async_save(updated)
-
-    # Rename only this known, generated test dashboard, not the user's original.
     collection = DashboardsCollection(hass)
     await collection.async_load()
-    existing = next(
+    stored = next(
         (item for item in collection.async_items()
-         if item.get("url_path") == DASHBOARD_PATH),
-        None,
+         if item.get("url_path") == DASHBOARD_PATH), None
     )
-    if existing and existing.get("title") == "EV Control Centre":
+    if stored and stored.get("title") in ("EV Control Centre", "Geely EV Control Centre (Test)"):
         await collection.async_update_item(
-            existing["id"], {"title": "Geely EV Control Centre (Test)"}
+            stored["id"], {"title": "Geely EV Control Centre (Test)"}
         )
         if frontend.async_panel_exists(hass, DASHBOARD_PATH):
             frontend.async_register_built_in_panel(
                 hass, "lovelace",
                 frontend_url_path=DASHBOARD_PATH,
-                require_admin=False,
-                show_in_sidebar=True,
+                require_admin=False, show_in_sidebar=True,
                 sidebar_title="Geely EV Control Centre (Test)",
                 sidebar_icon="mdi:ev-station",
-                config={"mode": "storage"},
-                update=True,
+                config={"mode": "storage"}, update=True,
             )
-    _LOGGER.info("Updated generated test Climate tab with independent schedule slots")
+    _LOGGER.info("Migrated generated test dashboard to four focused pages")
