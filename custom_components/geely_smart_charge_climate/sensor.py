@@ -24,6 +24,7 @@ from .simulator import simulate
 from .weekly_schedule import next_charge
 from .climate_schedule import next_event
 from .charge_climate import snapshot as linked_comfort_snapshot
+from .vehicle_activity import vehicle_activity
 
 
 async def async_setup_entry(
@@ -39,7 +40,8 @@ async def async_setup_entry(
         LiveTestStatusSensor(entry),
         AutomaticChargeStatusSensor(entry),
         ManualClimateStatusSensor(entry),
-        ManualChargingStatusSensor(entry),
+        ManualChargingStatusSensor(hass, entry),
+        VehicleChargingStatusSensor(hass, entry),
         ScheduledClimateStatusSensor(entry),
     ])
 
@@ -478,22 +480,40 @@ class ManualClimateStatusSensor(SensorEntity):
         self.async_on_remove(self.entry.runtime_data.listen(self.async_write_ha_state))
 
 
-class ManualChargingStatusSensor(SensorEntity):
-    """Product-facing manual charge state, without temporary arming jargon."""
+class ManualChargingStatusSensor(GeelyObservedBase):
+    """Manual ownership status never claims the vehicle is idle when charging.
+
+    The integration can observe charging after an older version reload,
+    without having enough historical data to prove a manual target.
+    """
 
     _attr_has_entity_name = True
     _attr_name = "Manual charging status"
     _attr_icon = "mdi:battery-charging"
 
-    def __init__(self, entry):
-        self.entry = entry
+    def __init__(self, hass, entry):
+        super().__init__(hass, entry)
         self._attr_unique_id = f"{entry.entry_id}_manual_charge_status"
 
     @property
     def native_value(self):
-        status = self.entry.runtime_data.status
-        return {"DISARMED": "IDLE", "ARMED": "READY",
-                "RUNNING": "CHARGING"}.get(status, status)
+        runtime = self.entry.runtime_data
+        if runtime.owned:
+            return {"RUNNING": "CHARGING", "DISARMED": "IDLE"}.get(
+                runtime.status, runtime.status
+            )
+        if runtime.auto.stop_requested_at is not None:
+            return "STOP_REQUESTED"
+        if runtime.auto.owned:
+            return "AUTOMATIC"
+        activity, _ = runtime.vehicle_activity()
+        if runtime.unmanaged_charge or activity in (
+                "CHARGING", "CHARGING_REPORTED"):
+            return "CHARGING_UNATTRIBUTED"
+        return {"DISARMED": "IDLE", "ARMED": "IDLE",
+                "RUNNING": "IDLE", "EXTERNAL": "IDLE"}.get(
+                    runtime.status, runtime.status
+                )
 
     @property
     def extra_state_attributes(self):
@@ -505,11 +525,62 @@ class ManualChargingStatusSensor(SensorEntity):
             "owns_manual_session": runtime.owned,
             "stop_pending": runtime.stop_requested_at is not None,
             "automatic_charging_paused_during_manual": runtime.auto.mode == "Off",
+            "charging_observed": runtime._vehicle_indicates_charging(),
+            "charging_source": runtime.vehicle_activity()[0],
+            "session_attribution": (
+                "manual" if runtime.owned else
+                "automatic" if runtime.auto.owned else
+                "unknown" if runtime.unmanaged_charge
+                or runtime._vehicle_indicates_charging() else "none"
+            ),
+            "unmanaged_charging": runtime.unmanaged_charge,
         }
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
         self.async_on_remove(self.entry.runtime_data.listen(self.async_write_ha_state))
+
+
+class VehicleChargingStatusSensor(GeelyObservedBase):
+    """Vehicle charge indicator separate from automatic/manual owner state."""
+
+    _attr_name = "Vehicle charging status"
+    _attr_icon = "mdi:ev-station"
+
+    def __init__(self, hass, entry):
+        super().__init__(hass, entry)
+        self._attr_unique_id = f"{entry.entry_id}_vehicle_charging_status"
+
+    @property
+    def native_value(self):
+        raw_switch = self.hass.states.get(self._switch)
+        raw_power = self.hass.states.get(self._power) if self._power else None
+        return vehicle_activity(
+            raw_switch.state if raw_switch else None,
+            raw_power.state if raw_power else None,
+        )[0]
+
+    @property
+    def extra_state_attributes(self):
+        runtime = self.entry.runtime_data
+        activity, power = runtime.vehicle_activity()
+        return {
+            "geely_charging_switch": runtime._raw(runtime.charging_switch),
+            "geely_power_kw": power,
+            "source": ("Geely charging power" if activity == "CHARGING"
+                       else "Geely charging switch" if activity == "CHARGING_REPORTED"
+                       else "Geely telemetry"),
+            "attribution": (
+                "manual" if runtime.owned else
+                "automatic" if runtime.auto.owned else
+                "unknown" if runtime.unmanaged_charge or
+                activity in ("CHARGING", "CHARGING_REPORTED") else "none"
+            ),
+            "automatic_enabled_preference": (
+                self.entry.options.get("automatic_charging_enabled", False) is True
+            ),
+            "controller_will_not_stop_unattributed_charge": True,
+        }
 
 
 class ScheduledClimateStatusSensor(SensorEntity):
