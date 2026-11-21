@@ -16,6 +16,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         + [SteeringPreferenceSwitch(hass, entry, profile) for profile in PROFILES]
         + [ComfortExpandSwitch(hass, entry, profile) for profile in PROFILES]
         + [ClimateSlotEnabled(hass, entry, slot, 'enabled') for slot in SLOTS]
+        + [ClimateSlotEnabled(hass, entry, slot, 'steering_heat') for slot in SLOTS]
     )
 
 
@@ -99,6 +100,11 @@ class ClimateSlotEnabled(ClimateScheduleSetting, SwitchEntity):
     """One independent weekly climate slot enable toggle (simulation-only)."""
 
     _attr_icon = "mdi:calendar-clock"
+
+    def __init__(self, hass, entry, slot, field):
+        super().__init__(hass, entry, slot, field)
+        if field == "steering_heat":
+            self._attr_icon = "mdi:steering"
 
     @property
     def is_on(self):
