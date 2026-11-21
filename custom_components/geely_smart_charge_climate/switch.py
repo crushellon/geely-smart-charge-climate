@@ -5,6 +5,7 @@ from .schedule_entities import ScheduleEntity
 from .comfort import PROFILES, get_value, set_value
 from .comfort_display import get_profile_visible, set_profile_visible
 from .weekly_schedule import DAY_NAMES
+from .charge_climate import get_value as get_linked, set_value as set_linked
 from .climate_schedule import SLOTS
 from .climate_schedule_entities import ClimateScheduleSetting
 
@@ -17,6 +18,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         + [ComfortExpandSwitch(hass, entry, profile) for profile in PROFILES]
         + [ClimateSlotEnabled(hass, entry, slot, 'enabled') for slot in SLOTS]
         + [ClimateSlotEnabled(hass, entry, slot, 'steering_heat') for slot in SLOTS]
+        + [ChargingLinkedComfortSwitch(hass, entry, day) for day in DAY_NAMES]
     )
 
 
@@ -115,3 +117,33 @@ class ClimateSlotEnabled(ClimateScheduleSetting, SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         await self.save(False)
+
+
+class ChargingLinkedComfortSwitch(SwitchEntity):
+    """Local per-day comfort association with the charging schedule."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:car-defrost-front"
+
+    def __init__(self, hass, entry, day):
+        self.hass = hass
+        self.entry = entry
+        self.day = day
+        self._attr_unique_id = f"{entry.entry_id}_{day}_linked_comfort_enabled"
+        self._attr_name = f"{day.title()} charging comfort enabled"
+
+    @property
+    def is_on(self):
+        return get_linked(self.entry.options, self.day, "enabled")
+
+    async def _save(self, enabled):
+        self.hass.config_entries.async_update_entry(
+            self.entry, options=set_linked(self.entry.options, self.day, "enabled", enabled)
+        )
+        self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs):
+        await self._save(True)
+
+    async def async_turn_off(self, **kwargs):
+        await self._save(False)
