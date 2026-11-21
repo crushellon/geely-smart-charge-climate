@@ -1,0 +1,18 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Geely Smart Charge & Climate — observation only",
+        "description": "Select Geely Connect entities. This development build will not start or stop charging or climate.",
+        "data": {
+          "battery_entity": "Battery percentage sensor",
+          "charging_switch": "Geely charging switch (observed only)",
+          "charging_power": "Geely charging power sensor (optional)"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only one observation-only configuration is supported."
+    }
+  }
+}
