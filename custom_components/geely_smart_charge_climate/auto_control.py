@@ -286,11 +286,13 @@ class AutomaticChargeController:
             return
         if self.stop_requested_at is None:
             self.stop_attempts = 0
+            self.stop_context = reason
+        # Preserve the original reason across stop retries: the completed
+        # target must not become a "cancelled" session on a retry.
         self.stop_requested_at = dt_util.utcnow()
         self.stop_attempts += 1
         self.off_checks = 0
-        self.stop_context = reason
-        self._update("STOP_REQUESTED", f"{reason}; awaiting Geely confirmation")
+        self._update("STOP_REQUESTED", f"{self.stop_context}; awaiting Geely confirmation")
         self._notice("stop_requested", f"Geely charging STOP requested: {reason}")
         try:
             await self.hass.services.async_call(
@@ -505,6 +507,24 @@ class AutomaticChargeController:
                 self.unexpected_since = None
                 await self._request_start(policy)
                 return
+            # A prior session can be finished even when the planner is
+            # currently WAITing for a newly estimated start time. Keep the
+            # actual outcome visible rather than replacing it with WAITING.
+            if policy.action == "WAIT" and policy.ready_by is not None:
+                key = (policy.day, policy.ready_by.date().isoformat())
+                previous = self.finished_deadlines.get(key)
+                if previous is not None:
+                    if previous["outcome"] == "completed":
+                        self._update(
+                            "COMPLETED", "Scheduled target already achieved "
+                            "for this departure; no repeat start", policy,
+                        )
+                    else:
+                        self._update(
+                            "PAUSED", "Previous charge ended below target; "
+                            "a deliberate resume is needed", policy,
+                        )
+                    return
             if policy.action == "STOP":
                 # User owns the public/home declaration. Wait for stable
                 # unexpected charging before intervening.
