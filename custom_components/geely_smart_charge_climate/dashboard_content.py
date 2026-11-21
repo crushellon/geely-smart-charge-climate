@@ -227,69 +227,144 @@ def dashboard_config(
         "Choose Cool/Warm on the charging schedule; its settings are on "
         "Comfort Settings. **Simulation only.**"}
     extra_sensors = extra_sensors or {}
-    extras = []
-    groups = (
-        ("Range & efficiency", (
-            ("electric_range", "Estimated range"),
-            ("range_at_full_charge", "Range at 100%"),
-            ("total_mileage", "Odometer"),
-            ("trip_meter", "Trip meter"),
-            ("trip_consumption", "Trip consumption"),
-            ("average_consumption", "Average consumption"),
-            ("efficiency", "Energy efficiency"),
+
+    def heading(title, icon):
+        return {
+            "type": "heading", "heading": title,
+            "heading_style": "title", "icon": icon,
+        }
+
+    def tiles(items, columns=2):
+        return {
+            "type": "grid", "columns": columns, "square": False,
+            "cards": [
+                {
+                    "type": "tile", "entity": extra_sensors[key],
+                    "name": label, "icon": icon,
+                }
+                for key, label, icon in items if key in extra_sensors
+            ],
+        }
+
+    grouped = (
+        ("Range & driving", "mdi:map-marker-distance", (
+            ("range_at_full_charge", "Range at 100%", "mdi:battery-arrow-up"),
+            ("total_mileage", "Odometer", "mdi:counter"),
+            ("trip_meter", "Trip meter", "mdi:map-marker-distance"),
+            ("trip_consumption", "Trip consumption", "mdi:lightning-bolt"),
         )),
-        ("Climate & temperatures", (
-            ("interior_temperature", "Cabin temperature"),
-            ("exterior_temperature", "Outside temperature"),
-            ("cabin_humidity", "Cabin humidity"),
+        ("Energy efficiency", "mdi:leaf", (
+            ("average_consumption", "Average consumption", "mdi:chart-line"),
+            ("efficiency", "Efficiency", "mdi:leaf"),
         )),
-        ("Tyre monitoring", (
-            ("tire_front_left", "Front left pressure"),
-            ("tire_front_right", "Front right pressure"),
-            ("tire_rear_left", "Rear left pressure"),
-            ("tire_rear_right", "Rear right pressure"),
-            ("tire_temperature_fl", "Front left temperature"),
-            ("tire_temperature_fr", "Front right temperature"),
-            ("tire_temperature_rl", "Rear left temperature"),
-            ("tire_temperature_rr", "Rear right temperature"),
+        ("Climate & temperatures", "mdi:thermometer", (
+            ("interior_temperature", "Cabin temperature", "mdi:car-seat"),
+            ("exterior_temperature", "Outside temperature", "mdi:weather-sunny"),
+            ("cabin_humidity", "Cabin humidity", "mdi:water-percent"),
         )),
-        ("Vehicle health", (
-            ("12v_battery", "12V battery"),
-            ("12v_voltage", "12V voltage"),
-            ("days_to_service", "Days to service"),
-            ("distance_to_service", "Distance to service"),
-            ("last_updated", "Last update"),
-            ("car_reported_at", "Last vehicle report"),
+        ("Tyre pressures", "mdi:car-tire-alert", (
+            ("tire_front_left", "Front left", "mdi:car-tire-alert"),
+            ("tire_front_right", "Front right", "mdi:car-tire-alert"),
+            ("tire_rear_left", "Rear left", "mdi:car-tire-alert"),
+            ("tire_rear_right", "Rear right", "mdi:car-tire-alert"),
         )),
-        ("Charging measurements", (
-            ("charge_current", "Charging current"),
-            ("charge_voltage", "Charging voltage"),
-            ("time_to_full_charge", "Time to full"),
+        ("Vehicle health", "mdi:car-cog", (
+            ("12v_battery", "12V battery", "mdi:car-battery"),
+            ("12v_voltage", "12V voltage", "mdi:current-dc"),
+            ("days_to_service", "Days to service", "mdi:calendar-clock"),
+            ("distance_to_service", "Distance to service", "mdi:road"),
+            ("last_updated", "Last update", "mdi:clock-outline"),
+            ("car_reported_at", "Last vehicle report", "mdi:car-clock"),
+        )),
+        ("Charging measurements", "mdi:ev-station", (
+            ("charge_current", "Charging current", "mdi:current-ac"),
+            ("charge_voltage", "Charging voltage", "mdi:sine-wave"),
+            ("time_to_full_charge", "Time to full", "mdi:timer-outline"),
         )),
     )
-    for title, fields in groups:
-        rows = [
-            {"entity": extra_sensors[key], "name": name}
-            for key, name in fields if key in extra_sensors
-        ]
-        if rows:
-            extras.append({
-                "type": "entities", "title": title,
-                "show_header_toggle": False, "entities": rows,
-            })
-    data_cards = [
+
+    # Preserve the original diagnostics in a secondary region, while making
+    # the main stats page primarily vehicle telemetry.
+    vehicle_cards = [
         {"type": "markdown", "content":
-         "## Geely EX5 — vehicle data\n"
-         "Telemetry, battery condition, charging and vehicle health."},
-        {"type": "gauge", "entity": battery, "name": "Battery",
-         "min": 0, "max": 100,
-         "severity": {"red": 0, "yellow": 25, "green": 60}},
-        {"type": "entities", "title": "Connection and charging",
-         "show_header_toggle": False,
-         "entities": [battery] + ([plug] if plug else [])
-         + ([charging_power] if charging_power else []) + [status]},
-        *stats_cards,
+         "# ⚡ GEELY EX5\\n"
+         "**Vehicle telemetry · Battery · Charging · Health**\\n\\n"
+         "*Read-only status. No vehicle commands are sent.*"},
+        {
+            "type": "grid", "columns": 2, "square": False, "cards": [
+                {"type": "gauge", "entity": battery, "name": "BATTERY",
+                 "min": 0, "max": 100, "needle": True,
+                 "severity": {"red": 0, "yellow": 25, "green": 60}},
+            ] + ([
+                {"type": "gauge", "entity": extra_sensors["electric_range"],
+                 "name": "ESTIMATED RANGE", "min": 0, "max": 500,
+                 "needle": True,
+                 "severity": {"red": 0, "yellow": 100, "green": 200}},
+            ] if "electric_range" in extra_sensors else []),
+        },
+        heading("Charging telemetry", "mdi:ev-station"),
+        {"type": "entities", "title": "Live charging status",
+         "show_header_toggle": False, "entities":
+         [battery] + ([plug] if plug else [])
+         + ([charging_power] if charging_power else []) + [status, simulation]},
     ]
+
+    # Keep each useful section immediately under its own heading. Empty
+    # categories are omitted instead of showing errors from missing sensors.
+    for title, icon, items in grouped[:2]:
+        grid = tiles(items)
+        if grid["cards"]:
+            vehicle_cards.extend([heading(title, icon), grid])
+
+    right_cards = []
+    for title, icon, items in grouped[2:4]:
+        grid = tiles(items)
+        if grid["cards"]:
+            right_cards.extend([heading(title, icon), grid])
+
+    temperature_items = [
+        ("tire_temperature_fl", "Front left"),
+        ("tire_temperature_fr", "Front right"),
+        ("tire_temperature_rl", "Rear left"),
+        ("tire_temperature_rr", "Rear right"),
+    ]
+    tyre_temps = [
+        {"entity": extra_sensors[key], "name": title}
+        for key, title in temperature_items if key in extra_sensors
+    ]
+    if tyre_temps:
+        right_cards.extend([
+            heading("Tyre temperatures", "mdi:thermometer"),
+            {"type": "entities", "title": "Tyre temperatures",
+             "show_header_toggle": False, "entities": tyre_temps},
+        ])
+
+    for title, icon, items in grouped[4:]:
+        grid = tiles(items)
+        if grid["cards"]:
+            right_cards.extend([heading(title, icon), grid])
+
+    right_cards.extend([
+        heading("Energy & battery history", "mdi:chart-line"),
+        {"type": "history-graph", "title": "Battery level — 7 days",
+         "hours_to_show": 168, "entities": [battery]},
+    ])
+    if charging_power:
+        right_cards.append({
+            "type": "history-graph", "title": "Charging power — 24 hours",
+            "hours_to_show": 24, "entities": [charging_power],
+        })
+    right_cards.extend([
+        heading("Charge planning diagnostics", "mdi:information-outline"),
+        {
+            "type": "markdown",
+            "content": "### Charging-rate learning\\n"
+            f"Charger rating: **{{{{ state_attr('{simulation}', 'charger_rated_kw') }}}} kW**  \\n"
+            f"Rate source: **{{{{ state_attr('{simulation}', 'charge_rate_source') }}}}**  \\n"
+            f"Learned rate: **{{{{ state_attr('{simulation}', 'learned_percentage_points_per_hour') or 'Not yet learned' }}}} %/hr**  \\n"
+            f"Samples: **{{{{ state_attr('{simulation}', 'learning_sample_count') or 0 }}}}",
+        },
+    ])
     all_climate = independent_climate_schedule_cards(entity_ids)
     return {
         "title": "Geely EV Control Centre (Test)",
@@ -334,8 +409,8 @@ def dashboard_config(
                 "type": "sections",
                 "max_columns": 2,
                 "sections": [
-                    _section(data_cards[:4]),
-                    _section(data_cards[4:] + extras),
+                    _section(vehicle_cards),
+                    _section(right_cards),
                 ],
             },
         ],
