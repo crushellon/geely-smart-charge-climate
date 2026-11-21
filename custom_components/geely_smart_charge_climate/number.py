@@ -19,6 +19,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
            for slot in SLOTS for field in ('temperature', 'lead_minutes', 'hold_minutes')]
         + [LinkedComfortTimingNumber(hass, entry, field)
            for field in ('lead_minutes', 'hold_minutes')]
+        + [LiveTestTargetNumber(entry)]
     )
 
 
@@ -128,3 +129,31 @@ class LinkedComfortTimingNumber(NumberEntity):
             self.entry, options=set_timing(self.entry.options, self.field, value)
         )
         self.async_write_ha_state()
+
+
+class LiveTestTargetNumber(NumberEntity):
+    """User-chosen manual live-test target; no scheduling effect."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Live test battery target"
+    _attr_icon = "mdi:battery-charging"
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 50
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, entry):
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_live_test_target"
+
+    @property
+    def native_value(self):
+        return self.entry.runtime_data.target
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self.async_on_remove(self.entry.runtime_data.listen(self.async_write_ha_state))
+
+    async def async_set_native_value(self, value):
+        await self.entry.runtime_data.async_set_target(value)
