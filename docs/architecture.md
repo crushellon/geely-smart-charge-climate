@@ -2,7 +2,7 @@
 
 ## Modules
 
-1. Home Assistant `config_flow`: select Geely vehicle / required entities, optional charger power and connection sensors, battery capacity, expected effective rate. Use options flow for later changes.
+1. Home Assistant `config_flow`: select Geely vehicle / required battery and charging entities, with optional Geely charging-power input and a rated charger-power estimate. No third-party smart charger is required. Use options flow for later changes.
 2. Read-only HA adapter: normalize battery %, plug state, charge switch, power, freshness, climate and optional seat controls. Check capabilities and never assume EX5-only entities.
 3. Planner: timezone-aware deadline, energy/time estimate, learned SOC gain over valid uninterrupted sessions, safety buffer and confidence.
 4. Session controller: explicit states `idle`, `scheduled_wait`, `charging`, `vehicle_finishing`, `complete`, `cancelled`, `blocked`, `fault`; explicit authorization on **every command**.
@@ -15,13 +15,14 @@
 - Only one charge-command authority.
 - Emergency stop blocks start and recovery; release restores normal availability without resuming cancelled manual session.
 - Manual override supersedes schedules until completed/cancelled.
-- Public charging disables home-session starts/recovery; must not stop remote public charging.
+- A persistent, explicit Public charging mode is the only automatic/public boundary; no home-location inference. When ON, suppress all new integration charging commands, retries and unexpected-charge stops. Existing legacy public-mode helper must also be honoured as a migration interlock.
+- When Public charging mode is OFF, the user accepts responsibility for ensuring the car is not charging publicly; test this warning conspicuously in the dashboard and onboarding.
 - Explicitly completed 100% session is never restarted by missing power.
-- Non-100 targets use intentional stop and verify power cessation, with guarded reporting if telemetry stale.
+- Non-100 targets use intentional stop and verify consecutive Geely charging-switch OFF states, corroborated by Geely power when valid; when power is missing, report the reduced confirmation strength.
 - Missing/stale SoC cannot authorize new charging, and missing plug state cannot be silently treated as plugged in.
 - Restart reconstructs intent conservatively; never assumes ongoing power proves permission to charge.
 - Command rate limits, timeouts, retry bounds, idempotency, and vehicle API concurrency handling.
-- If optional smart charger is absent, fault detection uses conservative Geely-only signals.
+- Charging control must function with Geely Connect alone; third-party charger sensors are optional display/diagnostic enhancements only.
 - If charger power and Geely disagree, show uncertainty rather than issuing rapid contradictory commands.
 - If charging rate is uncertain, prefer an earlier start and clearly warn if deadline is infeasible.
 
