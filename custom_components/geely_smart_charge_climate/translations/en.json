@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Geely Smart Charge & Climate — observation only",
-        "description": "Select Geely Connect entities. This development build will not start or stop charging or climate.",
+        "description": "Geely entities are suggested when an unambiguous vehicle is found. Confirm the selections. This development version cannot control charging or climate.",
         "data": {
           "battery_entity": "Battery percentage sensor",
           "charging_switch": "Geely charging switch (observed only)",
@@ -13,6 +13,12 @@
     },
     "abort": {
       "single_instance_allowed": "Only one observation-only configuration is supported."
+    },
+    "error": {
+      "invalid_entity": "Select available, enabled entities from Geely Connect.",
+      "not_geely": "The selected entity is not registered to a Geely integration.",
+      "different_vehicles": "Selected entities must belong to the same Geely integration entry.",
+      "invalid_battery": "The battery sensor must report a percentage between 0 and 100."
     }
   }
 }
