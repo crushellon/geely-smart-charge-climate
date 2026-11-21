@@ -23,6 +23,12 @@ class GeelySmartChargeClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
 
     VERSION = 1
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Expose the weekly schedule editor through Home Assistant Configure."""
+        return GeelyScheduleOptionsFlow()
+
     async def async_step_user(self, user_input: dict | None = None):
         """Prefill Geely entities and a standard 7 kW charger."""
         if self._async_current_entries():
