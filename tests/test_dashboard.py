@@ -142,6 +142,26 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(len(gauges[0]["cards"]), 2)
         self.assertNotIn("average_speed", str(cards))
 
+    def test_wall_connector_remains_optional(self):
+        config = module.dashboard_config(
+            self.ids, "sensor.example_battery",
+            charging_power="sensor.example_charge_power",
+            charger_sensors={
+                "power": "sensor.tesla_wall_connector_total_power",
+                "connected": "binary_sensor.tesla_wall_connector_vehicle_connected",
+                "session_energy": "sensor.tesla_wall_connector_session_energy",
+            },
+        )
+        data_cards = sum(
+            (section["cards"] for section in config["views"][3]["sections"]), []
+        )
+        self.assertTrue(any(card.get("heading") == "Wall Connector"
+                            for card in data_cards))
+        graph = next(c for c in data_cards
+                     if c.get("title") == "Charging power — 24 hours")
+        self.assertEqual(len(graph["entities"]), 2)
+        self.assertNotIn("average_speed", str(data_cards))
+
     def test_optional_sensors_can_be_absent(self):
         result = module.dashboard_config(self.ids, "sensor.example_battery")
         self.assertEqual(len(result["views"]), 4)
