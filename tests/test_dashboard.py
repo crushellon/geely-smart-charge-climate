@@ -115,6 +115,26 @@ class DashboardTests(unittest.TestCase):
         self.assertNotIn("climate.my_geely", text)
         self.assertIn("Simulation only", text)
 
+    def test_available_vehicle_data_in_its_own_page(self):
+        rich = module.dashboard_config(
+            self.ids, "sensor.example_battery",
+            extra_sensors={
+                "electric_range": "sensor.example_electric_range",
+                "efficiency": "sensor.example_efficiency",
+                "interior_temperature": "sensor.example_interior_temperature",
+                "tire_front_left": "sensor.example_tire_front_left",
+                "12v_battery": "sensor.example_12v_battery",
+            },
+        )
+        cards = sum(
+            (section["cards"] for section in rich["views"][3]["sections"]), []
+        )
+        titles = [card.get("title") for card in cards]
+        for title in ("Range & efficiency", "Climate & temperatures",
+                      "Tyre monitoring", "Vehicle health"):
+            self.assertIn(title, titles)
+        self.assertNotIn("Average speed", str(cards))
+
     def test_optional_sensors_can_be_absent(self):
         result = module.dashboard_config(self.ids, "sensor.example_battery")
         self.assertEqual(len(result["views"]), 4)
