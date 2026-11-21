@@ -383,6 +383,8 @@ class AutomaticChargeController:
         self.started_at = dt_util.utcnow()
         self._recovery_started_at = None
         self._persist_session(True)
+        if hasattr(self.manual, "_save_options"):
+            self.manual._save_options(manual_session={"active": False})
         self.saw_charging = False
         self.off_checks = 0
         self._update("STARTING", f"Starting {plan.day} charge to {plan.target}%", plan)
