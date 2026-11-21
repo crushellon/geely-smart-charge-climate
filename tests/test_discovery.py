@@ -18,9 +18,16 @@ class DiscoveryStaticTests(unittest.TestCase):
 
     def test_no_device_control_actions_in_observer(self):
         for file in ROOT.glob("*.py"):
+            # The only authorised writer is the opt-in manual live controller.
+            if file.name == "live_control.py":
+                continue
             source = file.read_text(encoding="utf-8")
             self.assertNotIn("hass.services.async_call", source)
             self.assertNotIn("async_call_service", source)
+        live = (ROOT / "live_control.py").read_text(encoding="utf-8")
+        self.assertIn("start_preflight(", live)
+        self.assertIn("self.armed = False", live)
+        self.assertIn("should_stop_owned_session(", live)
 
     def test_schedule_controls_instead_of_configure_menu(self):
         """Day settings belong in dashboard entities, not Configure."""
