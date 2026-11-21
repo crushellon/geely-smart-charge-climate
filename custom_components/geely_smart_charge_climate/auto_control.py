@@ -349,10 +349,13 @@ class AutomaticChargeController:
         """Unload safely. No unattended charge control survives restart."""
         if self.owned or self.stop_requested_at is not None:
             async with self._lock:
-                if self._home() is True and self._charging():
-                    # A graceful reload can stop our own session. Full charges
-                    # aren't stopped for reaching 100, but shutdown is an
-                    # explicit cancellation of an ephemeral live controller.
+                if self.owned and self.owned_target == 100:
+                    # A Home Assistant reload is not a user request to cancel
+                    # 100% charging. Let Geely finish the session itself.
+                    self._release(
+                        "OFF", "Home Assistant unloaded; 100% termination left to Geely"
+                    )
+                elif self._home() is True and self._charging():
                     await self._request_stop("Integration unloading")
         self.mode = "Off"
         self.manual._notify()
