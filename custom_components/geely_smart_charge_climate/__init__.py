@@ -13,7 +13,7 @@ from .dashboard_setup import async_ensure_dashboard
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
-    Platform.SENSOR, Platform.SWITCH, Platform.NUMBER, Platform.TIME
+    Platform.SENSOR, Platform.SWITCH, Platform.NUMBER, Platform.TIME, Platform.SELECT
 ]
 
 
