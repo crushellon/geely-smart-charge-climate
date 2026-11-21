@@ -27,7 +27,7 @@ class AuthorizationTests(unittest.TestCase):
         self.schedule = {"monday": {"enabled": True, "target": 80, "ready_time": "07:00"}}
         self.params = dict(
             now=self.now, schedule=self.schedule, soc=60, charging=False,
-            at_home=True, plugged=True,
+            plugged=True,
         )
 
     def test_next_morning_charging_window(self):
@@ -53,15 +53,25 @@ class AuthorizationTests(unittest.TestCase):
             now=self.now + timedelta(hours=7))))
         self.assertNotEqual(waiting.action, "START")
 
-    def test_never_control_public_or_unverified_home(self):
+    def test_never_control_public_or_unverified_plug(self):
         for extra in (
-            {"at_home": None}, {"at_home": False}, {"plugged": None},
-            {"public_mode": True}, {"emergency": True},
+            {"plugged": None}, {"public_mode": True}, {"emergency": True},
             {"legacy_clear": False}, {"soc": None},
         ):
             with self.subTest(extra=extra):
                 d = auth.decide(**(self.params | extra | {"charging": True}))
                 self.assertNotIn(d.action, ("START", "STOP"))
+
+    def test_explicit_public_mode_disables_unexpected_charge_stop(self):
+        decision = auth.decide(**(self.params | {
+            "schedule": {}, "charging": True, "public_mode": True,
+        }))
+        self.assertEqual(decision.action, "BLOCKED")
+
+    def test_geely_plug_and_user_mode_are_sufficient(self):
+        decision = auth.decide(**self.params)
+        self.assertEqual(decision.action, "START")
+        self.assertEqual(decision.day, "monday")
 
     def test_manually_owned_charge_takes_precedence(self):
         d = auth.decide(**(self.params | {"manual_owned": True, "charging": True}))
