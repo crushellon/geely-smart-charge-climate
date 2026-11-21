@@ -97,7 +97,9 @@ class GeelyObservationSensor(GeelyObservedBase):
     def extra_state_attributes(self) -> dict:
         """Show selected sources and raw readings."""
         result = {
-            "control_mode": "read_only",
+            "control_mode": ("automatic_active" if self.entry.runtime_data.auto.mode == "Active"
+                             else "monitor" if self.entry.runtime_data.auto.mode == "Monitor"
+                             else "read_only"),
             "battery_source": self._battery,
             "charging_switch_source": self._switch,
             "plug_source": self._plug,
@@ -310,7 +312,7 @@ class LiveTestStatusSensor(SensorEntity):
             "manual_target": live.target,
             "active_target": live.active_target,
             "vehicle_commands_sent_by_simulation": False,
-            "automatic_scheduling_enabled": False,
+            "automatic_scheduling_enabled": live.auto.mode == "Active",
             "plug_state": live._raw(live.plug),
             "legacy_controller_state": live._raw("input_boolean.ev_controller_enabled"),
             "legacy_automation_state": live._raw("binary_sensor.ev_legacy_charging_controllers_active"),
