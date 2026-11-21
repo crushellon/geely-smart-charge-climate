@@ -48,6 +48,19 @@ class DummyAutomatic:
         return None
 
 
+class DummyScheduledClimate:
+    def __init__(self, manual):
+        self.status = "IDLE"
+        self.message = "No schedule"
+        self.active = None
+
+    async def async_tick(self):
+        return None
+
+    async def async_manual_override(self, action):
+        return None
+
+
 class DummyClimate:
     def __init__(self, hass, entry, notify):
         self.status = "IDLE"
