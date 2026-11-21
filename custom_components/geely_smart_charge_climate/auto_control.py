@@ -85,6 +85,10 @@ class AutomaticChargeController:
         except (TypeError, ValueError):
             return None
 
+    def _emergency(self):
+        return (self.entry.options.get("emergency_stop", False) is True
+                or self._raw(EMERGENCY_STOP) == "on")
+
     def _soc(self):
         try:
             value = float(self._raw(self.manual.battery))
@@ -192,7 +196,7 @@ class AutomaticChargeController:
             rate_kw=self._effective_kw(),
             capacity_kwh=DEFAULT_USABLE_CAPACITY_KWH,
             public_mode=self._public_mode(),
-            emergency=self._raw(EMERGENCY_STOP) == "on",
+            emergency=self._emergency(),
             legacy_clear=self._legacy_clear(),
             manual_owned=self.manual.owned or self.manual.armed,
         )
@@ -533,7 +537,7 @@ class AutomaticChargeController:
             if self.owned:
                 # A latched session remains authorised after the calculated
                 # start time shifts with rising SOC and after ready-by.
-                if self._raw(EMERGENCY_STOP) == "on" or not self._legacy_clear():
+                if self._emergency() or not self._legacy_clear():
                     await self._request_stop("Safety interlock activated")
                     return
                 if self.mode != "Active":
@@ -589,7 +593,7 @@ class AutomaticChargeController:
 
             # Emergency stop can intervene in an observed charging session
             # only while the user has NOT designated public charging mode.
-            if self._raw(EMERGENCY_STOP) == "on":
+            if self._emergency():
                 if (self.mode == "Active" and not self.manual.owned
                         and self._charging()):
                     await self._request_stop("Emergency stop requested")
