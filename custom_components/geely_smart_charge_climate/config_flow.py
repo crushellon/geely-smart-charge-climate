@@ -3,7 +3,6 @@
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
@@ -22,12 +21,6 @@ class GeelySmartChargeClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN
     """Select one Geely source and the charger's nominal input power."""
 
     VERSION = 1
-
-    @staticmethod
-    @callback
-    def async_get_options_flow(config_entry):
-        """Expose the weekly schedule editor through Home Assistant Configure."""
-        return GeelyScheduleOptionsFlow()
 
     async def async_step_user(self, user_input: dict | None = None):
         """Prefill Geely entities and a standard 7 kW charger."""
