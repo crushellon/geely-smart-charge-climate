@@ -287,7 +287,7 @@ class AutomaticChargeController:
         self.off_checks = 0
         self._update("RECOVERING", "Previous scheduled charge restored; checking Geely")
 
-    async def async_set_mode(self, mode):
+    async def async_set_mode(self, mode, deliberate=True):
         if mode not in MODES:
             raise ValueError("Unsupported automatic controller mode")
         async with self._lock:
