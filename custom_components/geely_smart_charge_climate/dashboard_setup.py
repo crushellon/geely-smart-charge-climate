@@ -34,6 +34,11 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
         "observer_status": ("sensor", f"{entry.entry_id}_observer_status"),
         "simulation_decision": ("sensor", f"{entry.entry_id}_simulation_decision"),
         "climate_next": ("sensor", f"{entry.entry_id}_climate_next"),
+        "live_test_status": ("sensor", f"{entry.entry_id}_live_test_status"),
+        "live_test_armed": ("switch", f"{entry.entry_id}_live_test_armed"),
+        "live_test_target": ("number", f"{entry.entry_id}_live_test_target"),
+        "live_test_start": ("button", f"{entry.entry_id}_live_test_start"),
+        "live_test_stop": ("button", f"{entry.entry_id}_live_test_stop"),
     }
     for day in DAYS:
         unique_ids.update({
