@@ -153,4 +153,28 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
     view["cards"] = comfort_cards(ids)
     updated["title"] = "Geely EV Control Centre (Test)"
     await stored_dashboard.async_save(updated)
+
+    # Rename only this known, generated test dashboard, not the user's original.
+    collection = DashboardsCollection(hass)
+    await collection.async_load()
+    existing = next(
+        (item for item in collection.async_items()
+         if item.get("url_path") == DASHBOARD_PATH),
+        None,
+    )
+    if existing and existing.get("title") == "EV Control Centre":
+        await collection.async_update_item(
+            existing["id"], {"title": "Geely EV Control Centre (Test)"}
+        )
+        if frontend.async_panel_exists(hass, DASHBOARD_PATH):
+            frontend.async_register_built_in_panel(
+                hass, "lovelace",
+                frontend_url_path=DASHBOARD_PATH,
+                require_admin=False,
+                show_in_sidebar=True,
+                sidebar_title="Geely EV Control Centre (Test)",
+                sidebar_icon="mdi:ev-station",
+                config={"mode": "storage"},
+                update=True,
+            )
     _LOGGER.info("Updated untouched test Climate tab with editable comfort profiles")
