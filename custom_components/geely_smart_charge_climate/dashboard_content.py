@@ -187,7 +187,7 @@ def dashboard_config(
               f" · **Session:** {{{{ states('{entity_ids['automatic_charge_decision']}') }}}}  \n"
               f"**Next charge:** {{{{ state_attr('{simulation}', 'estimated_start') or 'Not calculated' }}}}  \n"
               f"**Ready by:** {{{{ state_attr('{simulation}', 'ready_by') or 'Not scheduled' }}}}"
-              f" · **Target:** {{{{ state_attr('{simulation}', 'target_percent') or '—' }}}}%",
+              f" · **Target:** {{{{ state_attr('{simulation}', 'target_percent') or '—' }}}}%"
         ),
     }
     safety_rows = [
