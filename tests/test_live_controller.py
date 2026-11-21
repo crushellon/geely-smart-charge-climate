@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import importlib.util
+from math import isfinite
 import sys
 import unittest
 
@@ -24,6 +25,7 @@ body = next(node for node in tree.body
             if isinstance(node, ast.ClassDef) and node.name == "LiveChargeController")
 env = {
     "asyncio": asyncio,
+    "isfinite": isfinite,
     "timedelta": timedelta,
     "dt_util": SimpleNamespace(utcnow=lambda: datetime.now(timezone.utc)),
     "callback": lambda fn: fn,
