@@ -294,6 +294,13 @@ class AutomaticChargeController:
                         else "Battery telemetry lost"
                     )
                     return
+                if (
+                    self.owned_target < 100
+                    and self.owned_deadline is not None
+                    and dt_util.now() >= self.owned_deadline + timedelta(hours=3)
+                ):
+                    await self._request_stop("Scheduled charge exceeded maximum overrun")
+                    return
                 if self._charging():
                     self.saw_charging = True
                     self.off_checks = 0
@@ -314,7 +321,8 @@ class AutomaticChargeController:
             # an unauthorised-session policy. It may stop home charging even
             # when the current session wasn't started by this controller.
             if self._raw(EMERGENCY_STOP) == "on":
-                if self.mode == "Active" and self._home() is True and self._charging():
+                if (self.mode == "Active" and not self.manual.owned
+                        and self._home() is True and self._charging()):
                     await self._request_stop("Emergency stop requested")
                 else:
                     self._update("BLOCKED", "Emergency stop active; starts suppressed")
