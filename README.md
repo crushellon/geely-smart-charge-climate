@@ -41,6 +41,23 @@ The final product is intended to have a dedicated **Resume schedule** control,
 not the developer Off/Monitor/Active selector. This release is still for
 attended testing; see the [session-resume test checklist](docs/session-completion-rearm-test.md).
 
+## Replanning a running charge (v0.3.7)
+
+If a user **edits the active day's battery target or ready-by time**, the
+controller now recalculates when charging needs to begin. If the new plan
+would start later than now, an already-running charge is stopped and
+verified, then automatically resumes when its **revised start window** opens.
+This is not considered final completion or a manual cancellation.
+Ordinary battery-percentage updates do **not** pause a running charge;
+otherwise charging could oscillate on each new SoC reading. If the newly
+chosen target is already reached, it stops immediately instead.
+
+The special 100% rule still applies: Geely manages normal full-charge
+balancing and termination. Public Charging Mode always suppresses automatic
+charging commands. This remains an **attended-test** release with the
+temporary Off / Monitor / Active selector; scheduled cabin commands remain
+disabled. See [the v0.3.7 live replanning test](docs/active-session-replanning-test.md).
+
 ## HACS setup and updates (custom repository)
 
 1. In Home Assistant, open **HACS**, then its menu **Custom repositories**.
