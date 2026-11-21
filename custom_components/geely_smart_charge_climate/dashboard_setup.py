@@ -42,14 +42,13 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
         "scheduled_climate_enabled": (
             "switch", f"{entry.entry_id}_scheduled_climate_enabled"
         ),
-        "live_test_status": ("sensor", f"{entry.entry_id}_live_test_status"),
         "automatic_charge_decision": ("sensor", f"{entry.entry_id}_automatic_charge_decision"),
         "public_charging_mode": ("switch", f"{entry.entry_id}_public_charging_mode"),
-        "live_test_target": ("number", f"{entry.entry_id}_live_test_target"),
         "automatic_charging_enabled": ("switch", f"{entry.entry_id}_automatic_charging_enabled"),
         "emergency_stop": ("switch", f"{entry.entry_id}_emergency_stop"),
         "manual_charge_target": ("number", f"{entry.entry_id}_live_test_target"),
         "manual_charge_status": ("sensor", f"{entry.entry_id}_manual_charge_status"),
+        "vehicle_charging_status": ("sensor", f"{entry.entry_id}_vehicle_charging_status"),
         "manual_cabin_temperature": ("number", f"{entry.entry_id}_manual_cabin_temperature"),
         "manual_climate_status": ("sensor", f"{entry.entry_id}_manual_climate_status"),
     }
