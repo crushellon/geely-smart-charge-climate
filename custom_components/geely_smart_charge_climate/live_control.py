@@ -339,6 +339,9 @@ class LiveChargeController:
             self.active_target = self.target
             self.started_at = dt_util.utcnow()
             self._remember_manual_session(True)
+            # This authorised manual charge supersedes any stale automatic
+            # ownership record left by an interrupted reload.
+            self._save_options(automatic_session={"active": False})
             self.observed_active = False
             self.stop_requested_at = None
             self.stop_attempts = 0
