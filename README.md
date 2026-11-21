@@ -58,6 +58,27 @@ charging commands. This remains an **attended-test** release with the
 temporary Off / Monitor / Active selector; scheduled cabin commands remain
 disabled. See [the v0.3.7 live replanning test](docs/active-session-replanning-test.md).
 
+## Geely STOP verification hardening (v0.3.8)
+
+**Safety-critical fix:** If a charge is started and Controller mode is
+changed to **Off** immediately afterward, Geely may report delayed vehicle
+state updates. Previous versions could claim STOPPED on stale telemetry,
+then miss a late charging start while Off.
+
+Stop verification now requires a **30-second settling period**, two
+affirmative low-power/OFF observations, and fresh Geely switch/power reports
+since the OFF command. A five-minute post-stop watchdog can reassert OFF
+if charging reappears after verified cancellation, even in Off mode.
+If fresh confirmation never arrives, the state remains unverified rather
+than claiming the charger has stopped. A separate **Stop verification**
+diagnostic is shown in the generated test dashboard.
+
+This remains an **attended-test integration**: the controller cannot
+guarantee Geely cloud state matches actual vehicle power, and should
+not be left unattended. Public Charging Mode still suppresses commands.
+Follow the [v0.3.8 live stop test](docs/delayed-start-stop-verification-test.md)
+and stop directly through the vehicle whenever status and actual power disagree.
+
 ## HACS setup and updates (custom repository)
 
 1. In Home Assistant, open **HACS**, then its menu **Custom repositories**.

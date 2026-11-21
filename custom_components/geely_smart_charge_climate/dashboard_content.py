@@ -160,6 +160,7 @@ def dashboard_config(
             "content": "#### Latest decision\n"
             f"Status: **{{{{ states('{entity_ids['automatic_charge_decision']}') }}}}**  \n"
             f"Reason: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'message') or '—' }}}}  \n"
+            f"Stop verification: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'stop_verification') or '—' }}}}  \n"
             f"Current target: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'active_target') or state_attr('{entity_ids['automatic_charge_decision']}', 'scheduled_target') or '—' }}}}%  \n"
             f"Current ready by: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'active_ready_by') or state_attr('{entity_ids['automatic_charge_decision']}', 'ready_by') or '—' }}}}  \n"
             f"Linked comfort enabled: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'linked_comfort_enabled') }}}}  \n"
