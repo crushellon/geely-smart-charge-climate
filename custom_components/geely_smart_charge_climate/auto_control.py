@@ -116,7 +116,7 @@ class AutomaticChargeController:
                          or getattr(state, "last_updated", None))
             if (not isinstance(timestamp, datetime)
                     or timestamp.tzinfo is None
-                    or timestamp < self.stop_started_at):
+                    or timestamp <= self.stop_started_at):
                 return False
         return True
 
@@ -380,8 +380,9 @@ class AutomaticChargeController:
                 (self.owned_day, self.owned_deadline.date().isoformat())
             ] = {"target": self.owned_target, "soc": soc, "outcome": outcome}
 
-        if state == "STOPPED" and self.stop_started_at is not None:
-            # Watch for a delayed Geely start even after valid stop feedback.
+        if (state == "STOPPED" and self.stop_started_at is not None
+                and self.stop_watch_until is None):
+            # A rebound does not extend this bounded watch indefinitely.
             self.stop_watch_until = dt_util.utcnow() + STOP_WATCH
         self.owned = False
         self.owned_target = None
