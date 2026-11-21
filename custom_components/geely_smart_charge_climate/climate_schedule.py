@@ -78,7 +78,7 @@ def next_event(now: datetime, options: dict) -> dict | None:
     """Earliest future occurrence, measured by ready-by time.
 
     Return the start and end times even when a lead time crosses midnight.
-    This function is advisory: it never starts a climate session.
+    Read-only upcoming-event helper; actual commands run in scheduled_climate.
     """
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("Need timezone-aware local time")
