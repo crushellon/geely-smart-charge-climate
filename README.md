@@ -6,6 +6,23 @@ An early **experimental integration** for Home Assistant, designed for the **Gee
 
 **Public charging responsibility:** Turn **Public charging mode ON before connecting to any public charger**, and turn it OFF when returning to normal automatic charging. The integration does not detect home location or public charging automatically. When ON, automatic charging starts, unexpected-charge stops and manual charging commands from this integration are suppressed. The native switch persists across Home Assistant restarts. Existing `input_boolean.ev_public_charging_mode` installations are still honoured as an additional interlock, so both must be OFF to resume normal charging. The optional Tesla Wall Connector is never required for core control.
 
+## Live schedule edits (v0.3.5)
+
+While an automatic charging session is running, editing its **battery target** or
+**ready-by time** now updates the active controller rather than only the simulated
+planner. Reducing the target to the current reported battery percentage (or below)
+requests a real stop immediately. Disabling the active day's schedule also requests
+a stop. Completed sessions are not restarted simply by editing their ready-by time.
+
+The **Automatic charging decision** status now refreshes for schedule changes
+and exposes the current target/deadline plus charging-linked comfort configuration
+(profile, temperature, seats, steering wheel and lead/hold timing). Comfort edits
+are **configuration and diagnostics only**; scheduled climate vehicle commands
+are still disabled in this experimental version.
+
+For the exact supervised tests and rollback guidance, see
+[Live schedule edit test plan](docs/live-schedule-edit-test.md).
+
 ## HACS setup and updates (custom repository)
 
 1. In Home Assistant, open **HACS**, then its menu **Custom repositories**.
