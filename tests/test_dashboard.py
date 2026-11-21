@@ -40,6 +40,8 @@ class DashboardTests(unittest.TestCase):
         self.ids["linked_comfort_hold_minutes"] = "number.linked_comfort_hold_minutes"
         self.ids.update({
             "live_test_status": "sensor.live_test_status",
+            "automatic_charge_mode": "select.automatic_charge_mode",
+            "automatic_charge_decision": "sensor.automatic_charge_decision",
             "live_test_armed": "switch.live_test_armed",
             "live_test_target": "number.live_test_target",
             "live_test_start": "button.live_test_start",
