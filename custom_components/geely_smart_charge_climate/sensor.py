@@ -367,8 +367,32 @@ class AutomaticChargeStatusSensor(SensorEntity):
             "last_event": auto.last_event,
             "restarts_disarm_controller": True,
             "climate_commands_enabled": False,
+            "enabled_schedule_days": [
+                day for day, values in
+                self.entry.options.get("weekly_schedule", {}).items()
+                if isinstance(values, dict) and values.get("enabled") is True
+            ],
+            "live_policy_action": (
+                auto._policy().action if auto.mode == "Monitor" else None
+            ),
+            "live_policy_reason": (
+                auto._policy().reason if auto.mode == "Monitor" else None
+            ),
         }
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
+        auto = self.entry.runtime_data.auto
         self.async_on_remove(self.entry.runtime_data.listen(self.async_write_ha_state))
+
+        # Independent read-only Monitor refresh, in addition to the live
+        # controller's central timer. Also updates schedule diagnostics.
+        def refresh(_now):
+            if auto.mode == "Monitor":
+                self.hass.async_create_task(auto.async_tick())
+            else:
+                self.async_write_ha_state()
+
+        self.async_on_remove(
+            async_track_time_interval(self.hass, refresh, timedelta(seconds=15))
+        )
