@@ -33,6 +33,34 @@ class DiscoveryStaticTests(unittest.TestCase):
         self.assertIn("if self.mode == \"Monitor\"", auto)
         self.assertIn("start_preflight(", auto)
 
+    def test_automatic_authorisation_rechecks_on_timer_options_and_wallbox(self):
+        """Monitor must refresh even if the vehicle doesn't change state."""
+        tree = ast.parse((ROOT / "live_control.py").read_text(encoding="utf-8"))
+        controller = next(node for node in tree.body
+                          if isinstance(node, ast.ClassDef)
+                          and node.name == "LiveChargeController")
+        listening = next(node for node in controller.body
+                         if isinstance(node, ast.AsyncFunctionDef)
+                         and node.name == "async_start_listening")
+        periodic = next(node for node in listening.body
+                        if isinstance(node, ast.FunctionDef)
+                        and node.name == "periodic")
+        options_changed = next(node for node in listening.body
+                               if isinstance(node, ast.AsyncFunctionDef)
+                               and node.name == "options_changed")
+        def auto_tick_present(node):
+            return any(isinstance(n, ast.Call)
+                       and isinstance(n.func, ast.Attribute)
+                       and n.func.attr == "async_tick"
+                       and isinstance(n.func.value, ast.Attribute)
+                       and n.func.value.attr == "auto"
+                       for n in ast.walk(node))
+        self.assertTrue(auto_tick_present(periodic))
+        self.assertTrue(auto_tick_present(options_changed))
+        source = ast.unparse(listening)
+        self.assertIn("add_update_listener(options_changed)", source)
+        self.assertIn("binary_sensor.tesla_wall_connector_vehicle_connected", source)
+
     def test_schedule_controls_instead_of_configure_menu(self):
         """Day settings belong in dashboard entities, not Configure."""
         tree = ast.parse((ROOT / "config_flow.py").read_text(encoding="utf-8"))
