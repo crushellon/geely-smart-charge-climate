@@ -79,6 +79,8 @@ class ScheduledClimateController:
                 or self.manual._raw("input_boolean.ev_emergency_stop") == "on"
             )
             candidates = [] if emergency else candidate_windows(now, self.entry.options)
+            if self.manual.public_mode():
+                candidates = [c for c in candidates if c["kind"] != "linked"]
             available = {c["key"]: c for c in candidates}
 
             if self.manual_override:
