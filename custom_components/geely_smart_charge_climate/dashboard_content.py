@@ -24,6 +24,34 @@ def schedule_card(day: str, entity_ids: dict[str, str]) -> dict:
     }
 
 
+def comfort_cards(entity_ids: dict[str, str]) -> list[dict]:
+    """Native cards for local comfort preferences only."""
+    result = [
+        {"type": "markdown",
+         "content": "## Cabin comfort profiles\\n"
+         "**Settings only:** These sliders do not heat, cool or activate "
+         "the vehicle. Climate commands and departure schedules are not active."},
+    ]
+    for profile in ("warm", "cool"):
+        result.append({
+            "type": "entities",
+            "title": f"{profile.title()} profile",
+            "show_header_toggle": False,
+            "entities": [
+                {"entity": entity_ids[f"{profile}_{field}"], "name": label}
+                for field, label in (
+                    ("temperature", "Cabin temperature"),
+                    ("driver_seat_heat", "Driver seat heating"),
+                    ("passenger_seat_heat", "Passenger seat heating"),
+                    ("driver_seat_vent", "Driver seat ventilation"),
+                    ("passenger_seat_vent", "Passenger seat ventilation"),
+                    ("steering_heat", "Steering wheel heating"),
+                )
+            ],
+        })
+    return result
+
+
 def dashboard_config(
     entity_ids: dict[str, str],
     battery: str,
@@ -135,16 +163,7 @@ def dashboard_config(
                 "path": "climate",
                 "icon": "mdi:car-defrost-front",
                 "type": "masonry",
-                "cards": [
-                    {
-                        "type": "markdown",
-                        "content": "## Climate & comfort\n"
-                        "Climate controls and heated-seat profiles will be "
-                        "added after the charging simulator has passed live "
-                        "validation. **This development release cannot command "
-                        "the vehicle's climate system.**",
-                    }
-                ],
+                "cards": comfort_cards(entity_ids),
             },
             {
                 "title": "Schedule",
