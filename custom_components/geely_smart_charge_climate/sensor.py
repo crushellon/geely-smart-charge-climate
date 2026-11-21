@@ -534,6 +534,9 @@ class ScheduledClimateStatusSensor(SensorEntity):
             "suppressed_occurrence": controller.suppressed_key,
             "completed_occurrences": len(controller.completed),
             "vehicle_commands_live": True,
+            "scheduled_climate_enabled": self.entry.options.get(
+                "scheduled_climate_enabled", False
+            ) is True,
         }
 
     async def async_added_to_hass(self):
