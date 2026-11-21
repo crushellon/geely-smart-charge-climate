@@ -31,7 +31,8 @@ env = {
                                utcnow=lambda: datetime.now(timezone.utc)),
     "persistent_notification": SimpleNamespace(
         async_create=lambda *a, **kw: logs.append((a, kw))),
-    "decide": policy.decide, "ChargeDecision": policy.ChargeDecision,
+    "decide": policy.decide, "charge_start_at": policy.charge_start_at,
+    "ChargeDecision": policy.ChargeDecision,
     "validate_day": sys.modules["auto_test_package.weekly_schedule"].validate_day,
     "start_preflight": safety.start_preflight,
     "LEGACY_CONTROLLER": safety.LEGACY_CONTROLLER,
@@ -171,6 +172,72 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.values["sensor.battery"] = "79"
         await self.auto.async_tick()
         self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+
+    async def test_reduce_live_100_to_two_percent_defers_until_new_start(self):
+        # Actual user report: 100% required an immediate start, but after
+        # reducing the target to a 2% top-up the computed start moves later.
+        self.entry.options["weekly_schedule"]["monday"] = {
+            "enabled": True, "target": 100, "ready_time": "07:00",
+        }
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on"])
+        self.assertTrue(self.auto.owned)
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 62
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.assertEqual(self.auto.decision.target, 62)
+        self.assertEqual(self.auto.decision.action, "WAIT")
+        self.assertEqual(self.auto.decision.ready_by.hour, 7)
+        self.assertGreater(self.auto.decision.start_at, now)
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+        self.assertEqual(self.auto.finished_deadlines[
+            ("monday", "2026-11-23")]["outcome"], "deferred")
+        # Do not restart until the new calculated charging window opens.
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "WAITING")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        earlier_clock = env["dt_util"].now
+        env["dt_util"].now = lambda: datetime(
+            2026, 11, 23, 6, 40, tzinfo=ZoneInfo("Australia/Brisbane"))
+        self.addCleanup(setattr, env["dt_util"], "now", earlier_clock)
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off", "turn_on"])
+        self.assertTrue(self.auto.owned)
+        self.assertEqual(self.auto.owned_target, 62)
+
+    async def test_routine_soc_updates_never_defer_owned_charge(self):
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on"])
+        # SoC rises but no schedule setting changes. Never oscillate.
+        self.values["sensor.battery"] = "79"
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "CHARGING")
+        self.assertEqual(self.services.calls, ["turn_on"])
+
+    async def test_edited_time_can_defer_owned_session(self):
+        # 60->80 by 07:00 requires starting immediately. With ready by 11:00
+        # the new start shifts into the future.
+        await self.auto.async_set_mode("Active")
+        self.entry.options["weekly_schedule"]["monday"]["ready_time"] = "11:00"
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertEqual(self.auto.decision.action, "WAIT")
+        self.assertEqual(self.auto.decision.ready_by.hour, 11)
+
+    async def test_repeated_ticks_while_deferred_do_not_restart(self):
+        await self.auto.async_set_mode("Active")
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 62
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        for _ in range(5):
+            await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertEqual(self.auto.status, "WAITING")
 
     async def test_editing_live_ready_by_time_updates_decision(self):
         self.entry.options["weekly_schedule"]["monday"]["target"] = 100
