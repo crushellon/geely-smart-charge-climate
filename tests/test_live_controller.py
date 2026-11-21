@@ -32,7 +32,7 @@ class DummyAutomatic:
         self.unexpected_since = None
         self._lock = asyncio.Lock()
 
-    async def async_set_mode(self, mode):
+    async def async_set_mode(self, mode, deliberate=True):
         self.mode = mode
 
     async def _request_stop(self, message):
