@@ -2,7 +2,7 @@
 
 An early **experimental integration** for Home Assistant, designed for the **Geely EX5** using community Geely Connect telemetry. Other Geely models have not been verified.
 
-**Safety:** Weekly charging plans and climate settings remain simulation-only. Version 0.2.0 adds **real vehicle charging commands only through a deliberately armed, user-pressed manual test**. It is not an unattended controller. Never run alongside another active charging controller. Read [the attended live-test checklist](docs/live-test-checklist.md) before trying it.
+**Safety (v0.3.0):** The proven manual start/stop test remains available. A separate automatic controller now offers **Off / Monitor / Active** modes. Off is the default after every restart. Monitor makes read-only authorisation decisions; Active can issue guarded home-only schedule starts and verified stops. **This is for attended testing, not yet an unattended overnight controller.** Never run alongside another active charging controller. Read [the automatic test checklist](docs/automatic-charging-test.md) before enabling Active.
 
 ## HACS setup and updates (custom repository)
 
@@ -21,12 +21,12 @@ The initial tracked version must be installed from HACS once; copying ZIP files 
 
 The setup wizard suggests matching EX5 sensors, including battery state, charging switch, and optional charging power. It uses a standard 7 kW single-phase charger rating by default and calculates initial battery-side estimates internally. Charging-rate learning collects reliable SOC changes and saves recent samples.
 
-After adding the integration, use the generated **Geely EV Control Centre (Test)** dashboard. Its Charging, Comfort Settings, Climate Scheduler and Vehicle Data pages use native Home Assistant cards. All seven charging days and climate slots start disabled. Their controls remain simulation-only.
+After adding the integration, use the generated **Geely EV Control Centre (Test)** dashboard. Its Charging, Comfort Settings, Climate Scheduler and Vehicle Data pages use native Home Assistant cards. All seven charging days and climate slots start disabled. The charging schedule becomes live only when the automatic controller is explicitly set to Active; the seven independent climate slots remain simulation-only.
 
-The integration exposes read-only `Observer status`, `Simulation decision`, `Next climate session`, and `Live test status` sensors. Any simulated `START`, `WAIT` or `STOP_AT_TARGET` value is a recommendation **only**, not proof that a command has been sent. A 100% target always uses vehicle-managed termination in the simulator and in the attended live test (unless the user explicitly requests a stop or an emergency interlock is activated).
+The integration exposes read-only `Observer status`, `Simulation decision`, `Next climate session`, `Live test status`, and `Automatic charging decision` sensors. Any simulated `START`, `WAIT` or `STOP_AT_TARGET` value is a recommendation **only**, not proof that a command has been sent. A 100% target always uses vehicle-managed termination in the simulator and in the attended live test (unless the user explicitly requests a stop or an emergency interlock is activated).
 
 ## Development status
 
-This is an **EX5-focused pre-release** under active testing, not a finished unattended charging controller. The only live commands available are explicit manual charge start/stop tests, disabled by default. Check the [development documentation](docs/read-only-milestone.md) and [repository issues](https://github.com/crushellon/geely-smart-charge-climate/issues).
+This is an **EX5-focused pre-release** under active testing, not yet a finished unattended charging controller. Live charging commands require either an armed manual test or explicitly selecting Active automatic mode. **Off and Monitor never send automatic commands.** Home presence requires a verified home Wall Connector, and HA notifications record decisions during Active mode. Check the [development documentation](docs/read-only-milestone.md) and [repository issues](https://github.com/crushellon/geely-smart-charge-climate/issues).
 
 Run offline checks using `python -m unittest discover -s tests -v`.
