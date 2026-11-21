@@ -19,8 +19,9 @@ from .const import (
     DOMAIN,
 )
 from .discovery import discover_plug_entity
-from .dashboard_content import DAYS, dashboard_config, comfort_cards
+from .dashboard_content import DAYS, dashboard_config, comfort_cards, independent_climate_schedule_cards
 from .comfort import PROFILES, FIELDS
+from .climate_schedule import SLOTS
 
 _LOGGER = logging.getLogger(__name__)
 DASHBOARD_PATH = "geely-ev-control-centre"
@@ -32,6 +33,7 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
     unique_ids = {
         "observer_status": ("sensor", f"{entry.entry_id}_observer_status"),
         "simulation_decision": ("sensor", f"{entry.entry_id}_simulation_decision"),
+        "climate_next": ("sensor", f"{entry.entry_id}_climate_next"),
     }
     for day in DAYS:
         unique_ids.update({
@@ -55,6 +57,17 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
         unique_ids[f"show_{profile}_settings"] = (
             "switch", f"{entry.entry_id}_show_{profile}_settings"
         )
+    for slot in SLOTS:
+        for field, platform in (
+            ("enabled", "switch"), ("day", "select"),
+            ("ready_time", "time"), ("temperature", "number"),
+            ("driver_seat", "select"), ("passenger_seat", "select"),
+            ("steering_heat", "switch"), ("lead_minutes", "number"),
+            ("hold_minutes", "number"),
+        ):
+            unique_ids[f"climate_slot_{slot}_{field}"] = (
+                platform, f"{entry.entry_id}_climate_slot_{slot}_{field}"
+            )
     result = {}
     for key, (platform, unique_id) in unique_ids.items():
         entity_id = registry.async_get_entity_id(platform, DOMAIN, unique_id)
@@ -165,14 +178,23 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
         and current_cards[2].get("type") == "entities"
         and current_cards[2].get("title") == "Cool profile"
     )
-    if not (old_placeholder or old_sliders):
+    original_style = (
+        len(current_cards) == 5
+        and current_cards[0].get("type") == "markdown"
+        and "Cabin comfort settings" in current_cards[0].get("content", "")
+        and [card.get("type") for card in current_cards[1:]]
+        == ["entities", "conditional", "entities", "conditional"]
+        and "expand settings" in current_cards[1].get("title", "")
+        and "expand settings" in current_cards[3].get("title", "")
+    )
+    if not (old_placeholder or old_sliders or original_style):
         # Preserve manually edited test dashboards and any newer layout.
         return
     from copy import deepcopy
 
     updated = deepcopy(config)
     view = next(view for view in updated["views"] if view.get("path") == "climate")
-    view["cards"] = comfort_cards(ids)
+    view["cards"] = comfort_cards(ids) + independent_climate_schedule_cards(ids)
     updated["title"] = "Geely EV Control Centre (Test)"
     await stored_dashboard.async_save(updated)
 
@@ -199,4 +221,4 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
                 config={"mode": "storage"},
                 update=True,
             )
-    _LOGGER.info("Updated untouched test Climate tab with editable comfort profiles")
+    _LOGGER.info("Updated generated test Climate tab with independent schedule slots")
