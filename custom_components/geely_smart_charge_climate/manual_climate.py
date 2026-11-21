@@ -68,6 +68,47 @@ class ManualClimateController:
         right = await self._request("select", "select_option", vent, option="Off")
         return left or right
 
+    async def apply_scheduled(self, settings):
+        """Apply one approved scheduled comfort session.
+
+        Serialises with manually requested climate so seat/steering commands
+        cannot interleave. Neither method controls the charging switch.
+        """
+        async with self._lock:
+            climate = self.entities.get("climate")
+            if not climate:
+                return False
+            main = await self._request(
+                "climate", "set_temperature", climate,
+                temperature=float(settings["temperature"]), hvac_mode="heat_cool",
+            )
+            if not main:
+                return False
+            # Geely Connect sends asynchronous cloud commands. Leave a small
+            # gap as in the original working package before seat commands.
+            await asyncio.sleep(5)
+            await self._seat("driver", settings["driver_seat"])
+            await asyncio.sleep(2)
+            await self._seat("passenger", settings["passenger_seat"])
+            await self._request(
+                "switch", "turn_on" if settings["steering_heat"] else "turn_off",
+                self.entities["steering"],
+            )
+            return True
+
+    async def stop_scheduled(self):
+        """Turn off scheduled cabin, both seats and wheel without touching EV charging."""
+        async with self._lock:
+            climate = self.entities.get("climate")
+            if not climate:
+                return False
+            main = await self._request("climate", "turn_off", climate)
+            await asyncio.sleep(2)
+            await self._seat("driver", "Off")
+            await self._seat("passenger", "Off")
+            await self._request("switch", "turn_off", self.entities["steering"])
+            return main
+
     async def apply(self, action):
         """Apply Cool/Warm/custom/off only when explicitly requested."""
         if action not in ("Cool", "Warm", "custom", "off"):
