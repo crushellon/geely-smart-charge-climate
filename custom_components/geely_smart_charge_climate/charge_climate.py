@@ -55,8 +55,8 @@ def set_timing(options: dict, field: str, value) -> dict:
 def snapshot(options: dict, day: str) -> dict:
     """Read the current charging-linked comfort configuration for diagnostics.
 
-    Configuration only: this does not run climate or send vehicle commands.
-    Both the active session and dashboard read fresh persisted settings.
+    Read-only snapshot of live settings. The scheduled climate runtime uses
+    these preferences, while this helper itself sends no commands.
     """
     from .comfort import get_value as get_profile_value
     from .comfort_display import get_seat_mode
