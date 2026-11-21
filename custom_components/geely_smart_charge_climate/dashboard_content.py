@@ -1,4 +1,4 @@
-"""Built-in Lovelace dashboard layout for the read-only EX5 preview.
+"""Native Lovelace EV Control Centre based on the original four-tab layout.
 
 Only native Home Assistant cards are used. No custom frontend resources, YAML
 file edits, or vehicle commands are required. Personal schedules are never
@@ -25,28 +25,39 @@ def schedule_card(day: str, entity_ids: dict[str, str]) -> dict:
 
 
 def comfort_cards(entity_ids: dict[str, str]) -> list[dict]:
-    """Display named Cool and Warm seat settings, without expand toggles."""
-    result = [
-        {"type": "markdown",
-         "content": "## Comfort settings\n"
-         "**Simulation only.** These preferences do not command the vehicle."}
-    ]
+    """Cool/Warm expanders and profiles from the original EV Control Centre."""
+    result = []
     for profile in ("cool", "warm"):
-        result.append({
-            "type": "entities",
-            "title": f"{profile.title()} profile",
-            "show_header_toggle": False,
-            "entities": [
-                {"entity": entity_ids[f"{profile}_temperature"],
-                 "name": "Cabin temperature"},
-                {"entity": entity_ids[f"{profile}_driver_seat_mode"],
-                 "name": "Driver seat"},
-                {"entity": entity_ids[f"{profile}_passenger_seat_mode"],
-                 "name": "Passenger seat"},
-                {"entity": entity_ids[f"{profile}_steering_toggle"],
-                 "name": "Steering wheel heating"},
-            ],
-        })
+        marker = entity_ids[f"show_{profile}_settings"]
+        result.extend([
+            {
+                "type": "entities",
+                "title": f"Comfort {profile.title()} — expand settings",
+                "show_header_toggle": False,
+                "entities": [{"entity": marker, "name": f"Show {profile.title()} settings"}],
+            },
+            {
+                "type": "conditional",
+                "conditions": [{"condition": "state", "entity": marker, "state": "on"}],
+                "card": {
+                    "type": "entities",
+                    "title": f"{profile.title()} profile",
+                    "show_header_toggle": False,
+                    "entities": [
+                        {"entity": entity_ids[f"{profile}_temperature"], "name": "Cabin temperature"},
+                        {"entity": entity_ids[f"{profile}_driver_seat_mode"], "name": "Driver seat"},
+                        {"entity": entity_ids[f"{profile}_passenger_seat_mode"], "name": "Passenger seat"},
+                        {"entity": entity_ids[f"{profile}_steering_toggle"], "name": "Steering wheel heating"},
+                    ],
+                },
+            },
+        ])
+    result.append({
+        "type": "markdown",
+        "content": "Comfort preferences are saved here. Manual Cool/Warm buttons "
+        "on EV Control can send Geely commands. Scheduled climate and "
+        "charging-linked preconditioning are still being developed.",
+    })
     return result
 
 
@@ -121,6 +132,7 @@ def dashboard_config(
     charging_switch: str | None = None,
     extra_sensors: dict[str, str] | None = None,
     charger_sensors: dict[str, str] | None = None,
+    climate_entity: str | None = None,
 ) -> dict:
     """Construct a native, mobile-friendly four-view Lovelace dashboard.
 
@@ -131,105 +143,162 @@ def dashboard_config(
     status = entity_ids["observer_status"]
     simulation = entity_ids["simulation_decision"]
 
-    automatic_panel = [
-        {
-            "type": "markdown",
-            "content": "### Automatic charging authorisation\n"
-            "**Off:** no automatic commands. "
-            "**Monitor:** records decisions without touching the car. "
-            "**Active:** permits scheduled charging and verified stopping of "
-            "unauthorised charging while Public Mode is OFF. "
-            "This testing-stage mode resets to Off after a Home Assistant restart. "
-            "Do not leave it unattended yet.",
-        },
-        {
-            "type": "entities",
-            "title": "Automatic controller & audit",
-            "show_header_toggle": False,
-            "entities": [
-                {"entity": entity_ids["public_charging_mode"],
-                 "name": "Public charging mode — turn ON when away/public"},
-                {"entity": entity_ids["automatic_charge_mode"],
-                 "name": "Controller mode"},
-                {"entity": entity_ids["automatic_charge_decision"],
-                 "name": "Latest authorisation decision"},
-            ],
-        },
-        {
-            "type": "markdown",
-            "content": "#### Latest decision\n"
-            f"Status: **{{{{ states('{entity_ids['automatic_charge_decision']}') }}}}**  \n"
-            f"Reason: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'message') or '—' }}}}  \n"
-            f"Stop verification: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'stop_verification') or '—' }}}}  \n"
-            f"Current target: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'active_target') or state_attr('{entity_ids['automatic_charge_decision']}', 'scheduled_target') or '—' }}}}%  \n"
-            f"Current ready by: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'active_ready_by') or state_attr('{entity_ids['automatic_charge_decision']}', 'ready_by') or '—' }}}}  \n"
-            f"Linked comfort enabled: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'linked_comfort_enabled') }}}}  \n"
-            f"Comfort profile: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'linked_comfort_profile') or '—' }}}}  \n"
-            f"Comfort temperature: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'linked_comfort_temperature') or '—' }}}} °C  \n"
-            f"Seats: driver {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'linked_comfort_driver_seat') or '—' }}}}, passenger {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'linked_comfort_passenger_seat') or '—' }}}}  \n"
-            f"Steering wheel heat: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'linked_comfort_steering_heat') }}}}  \n"
-            f"Comfort lead/hold: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'linked_comfort_lead_minutes') }}}} / {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'linked_comfort_hold_minutes') }}}} min  \n"
-            "*Comfort settings are saved immediately; automatic climate commands are not enabled yet.*  \n"
-            f"Public charging: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'public_charging_mode') }}}}  \n"
-            f"Next ready by: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'ready_by') or '—' }}}}  \n"
-            f"Enabled days: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'enabled_schedule_days') or [] }}}}  \n"
-            f"Live policy: {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'live_policy_reason') or '—' }}}}",
-        },
-    ]
+    # Show independent telemetry sources honestly. Wallbox power may be
+    # available when the Geely cloud reports 0 or has not updated yet.
+    extra_sensors = extra_sensors or {}
+    charger_sensors = charger_sensors or {}
+    geely_power_id = charging_power or "sensor.geely_power_not_configured"
+    wall_power_id = charger_sensors.get("power", "sensor.optional_wallbox_not_configured")
+    switch_id = charging_switch or "switch.geely_charging_not_configured"
+    range_id = extra_sensors.get("electric_range")
 
-    live_panel = [
-        {
-            "type": "markdown",
-            "content": "### Live manual charging test\n"
-            "**Opt-in test only.** The new controller does not run schedules "
-            "or climate. First disable your old charging controller and verify "
-            "it is inactive. Then arm this test and use Start. "
-            "Stay present for the first short charge.",
-        },
-        {
-            "type": "entities",
-            "title": "Manual test and safety",
-            "show_header_toggle": False,
-            "entities": [
-                {"entity": entity_ids["live_test_status"], "name": "Test status"},
-                {"entity": entity_ids["live_test_armed"], "name": "Arm live test"},
-                {"entity": entity_ids["live_test_target"], "name": "Test battery target"},
-            ],
-        },
-        {
-            "type": "grid",
-            "columns": 2,
-            "square": False,
-            "cards": [
-                {
-                    "type": "button",
-                    "entity": entity_ids["live_test_start"],
-                    "name": "Start test",
-                    "icon": "mdi:play-circle",
-                    "tap_action": {
-                        "action": "perform-action",
-                        "perform_action": "button.press",
-                        "target": {"entity_id": entity_ids["live_test_start"]},
-                        "confirmation": {
-                            "text": "Start a real Geely charge? Old charging control must be disabled."
-                        },
-                    },
-                },
-                {
-                    "type": "button",
-                    "entity": entity_ids["live_test_stop"],
-                    "name": "Stop test",
-                    "icon": "mdi:stop-circle",
-                    "tap_action": {
-                        "action": "perform-action",
-                        "perform_action": "button.press",
-                        "target": {"entity_id": entity_ids["live_test_stop"]},
-                    },
-                },
-            ],
-        },
-    ]
+    def action_button(key: str, title: str, icon: str, confirmation: str | None = None) -> dict:
+        card = {
+            "type": "button", "entity": entity_ids[key],
+            "name": title, "icon": icon,
+            "tap_action": {
+                "action": "perform-action",
+                "perform_action": "button.press",
+                "target": {"entity_id": entity_ids[key]},
+            },
+        }
+        if confirmation:
+            card["tap_action"]["confirmation"] = {"text": confirmation}
+        return card
 
+    range_line = (
+        f" · **Range:** {{{{ states('{range_id}') }}}} km"
+        if range_id else ""
+    )
+    summary = {
+        "type": "markdown",
+        "content": (
+            "### Geely EX5\n"
+            f"**Battery:** {{{{ states('{battery}') }}}}%"
+            + range_line + "  \n"
+            + f"{{% set gp = states('{geely_power_id}') | float(-1) %}}"
+              f"{{% set wp = states('{wall_power_id}') | float(-1) %}}"
+              f"{{% set enabled = is_state('{entity_ids['automatic_charging_enabled']}', 'on') %}}"
+              f"**Charging:** {{% if wp > 0.25 %}}{{{{ wp | round(2) }}}} kW (charger)"
+              f"{{% elif gp > 0.25 %}}{{{{ gp | round(2) }}}} kW (Geely)"
+              f"{{% elif is_state('{switch_id}', 'on') %}}Requested — power not confirmed"
+              f"{{% else %}}Off{{% endif %}}  \n"
+              f"**Automatic charging:** {{% if enabled %}}Enabled{{% else %}}Disabled{{% endif %}}"
+              f" · **Session:** {{{{ states('{entity_ids['automatic_charge_decision']}') }}}}  \n"
+              f"**Next charge:** {{{{ state_attr('{simulation}', 'estimated_start') or 'Not calculated' }}}}  \n"
+              f"**Ready by:** {{{{ state_attr('{simulation}', 'ready_by') or 'Not scheduled' }}}}"
+              f" · **Target:** {{{{ state_attr('{simulation}', 'target_percent') or '—' }}}}%",
+        ),
+    }
+    safety_rows = [
+        {"entity": entity_ids["automatic_charging_enabled"],
+         "name": "Automatic charging enabled"},
+        {"entity": entity_ids["public_charging_mode"],
+         "name": "Public charging mode"},
+        {"entity": entity_ids["automatic_charge_decision"],
+         "name": "Charging session"},
+    ]
+    if plug:
+        safety_rows.append({"entity": plug, "name": "Geely plugged in"})
+    if "connected" in charger_sensors:
+        safety_rows.append({
+            "entity": charger_sensors["connected"], "name": "Wall connector (optional)"
+        })
+    safety = {
+        "type": "entities", "title": "Charging and safety",
+        "show_header_toggle": False, "entities": safety_rows,
+    }
+    safety_buttons = {
+        "type": "grid", "columns": 2, "square": False, "cards": [
+            action_button(
+                "emergency_stop", "Emergency STOP", "mdi:alert-octagon",
+                "Stop Geely charging and latch the emergency lockout?",
+            ),
+            action_button(
+                "emergency_release", "Release emergency stop", "mdi:lock-open",
+                "Release the emergency lockout? Automatic charging will not be enabled by this action.",
+            ),
+        ],
+    }
+    manual_target_id = entity_ids["manual_charge_target"]
+    manual_charge = {
+        "type": "entities", "title": "Manual charge",
+        "show_header_toggle": False,
+        "entities": [
+            {"entity": manual_target_id, "name": "Target percentage"},
+            {"entity": entity_ids["live_test_status"], "name": "Manual charge status"},
+        ],
+    }
+    manual_preview = {
+        "type": "markdown",
+        "content": (
+            "### Manual charge preview\n"
+            f"{{% set soc = states('{battery}') | float(-1) %}}"
+            f"{{% set target = states('{manual_target_id}') | float(-1) %}}"
+            f"{{% set capacity = state_attr('{simulation}', 'assumed_usable_capacity_kwh') | float(68.39) %}}"
+            f"{{% set rate = state_attr('{simulation}', 'assumed_effective_kw') | float(6.5) %}}"
+            "{% if soc >= 0 and target >= 0 and rate > 0 %}"
+            "{% set energy = [target - soc, 0] | max * capacity / 100 %}"
+            "{% set mins = (energy / rate * 60) | round(0, 'ceil') | int %}"
+            "**{{ soc|round(0)|int }}% → {{ target|round(0)|int }}%**"
+            " · **{{ energy | round(1) }} kWh** to battery  \n"
+            "**Estimated duration:** {{ mins // 60 }} hr {{ mins % 60 }} min  \n"
+            "{% if mins > 0 %}**If started now:** approximately "
+            "{{ (now() + timedelta(minutes=mins)).strftime('%I:%M %p') }}"
+            "{% endif %}"
+            "{% else %}Waiting for live battery and target readings.{% endif %}\n\n"
+            "*Estimated from configured battery capacity and charging rate; "
+            "100% balancing may take longer.*"
+        ),
+    }
+    manual_buttons = {
+        "type": "grid", "columns": 2, "square": False, "cards": [
+            action_button("manual_charge_start", "Start chosen target", "mdi:play",
+                          "Start a manual Geely charge? Automatic schedule will pause until Resume schedule."),
+            action_button("manual_charge_stop", "Stop manual", "mdi:stop",
+                          "Stop the integration-owned manual charge?"),
+            action_button("manual_charge_quick80", "Quick 80%", "mdi:battery-80"),
+            action_button("manual_charge_quick100", "Quick 100%", "mdi:battery-charging-100"),
+            action_button("manual_charge_resume", "Resume schedule", "mdi:calendar-check"),
+        ],
+    }
+    climate_rows = [
+        {"entity": entity_ids["manual_cabin_temperature"], "name": "Custom cabin temperature"},
+        {"entity": entity_ids["manual_climate_status"], "name": "Manual climate status"},
+    ]
+    if climate_entity:
+        climate_rows.insert(0, {"entity": climate_entity, "name": "Cabin climate"})
+    manual_climate = {
+        "type": "entities", "title": "Manual climate",
+        "show_header_toggle": False, "entities": climate_rows,
+    }
+    manual_climate_buttons = {
+        "type": "grid", "columns": 2, "square": False,
+        "cards": [
+            action_button("manual_climate_cool", "Comfort Cool", "mdi:snowflake"),
+            action_button("manual_climate_warm", "Comfort Warm", "mdi:weather-sunny"),
+            action_button("manual_climate_custom", "Custom temperature ON", "mdi:thermometer"),
+            action_button("manual_climate_off", "Climate + seats OFF", "mdi:power"),
+        ],
+    }
+    power_details = (
+        f"**Geely switch:** {{{{ states('{switch_id}') }}}}"
+        f" · **Geely power:** {{{{ states('{geely_power_id}') }}}} kW  \n"
+        + (f"**Optional charger power:** {{{{ states('{wall_power_id}') }}}} kW  \n"
+           if "power" in charger_sensors else "")
+        + f"**Stop verification:** {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'stop_verification') or 'Idle' }}}}  \n"
+        + "*Power readings can be delayed. A charging request is not proof that energy is flowing.*"
+    )
+    charging_cards = [
+        summary, safety, safety_buttons, manual_charge, manual_preview,
+        manual_buttons, manual_climate, manual_climate_buttons,
+        {"type": "markdown", "content": "### Charging telemetry\n" + power_details},
+        {"type": "markdown", "content":
+         "**Testing limitation:** Automatic charging currently requires re-enabling "
+         "after a Home Assistant restart; unattended restart recovery is not "
+         "yet complete. Public charging mode must be ON for public sessions. "
+         "Linked and independent climate schedules do not yet send commands."},
+    ]
 
     # Use Markdown instead of a switch entity row to prevent accidental toggles.
     status_line = (
@@ -293,18 +362,6 @@ def dashboard_config(
         },
     ]
 
-    schedule_cards = [
-        {
-            "type": "markdown",
-            "content": "## Weekly charging schedule\n"
-            "Choose the **day and time the battery must be ready**, not when "
-            "charging starts. Evenings and shift-work deadlines are supported. "
-            "Charging may begin earlier on the same day or the previous day. "
-            "Monitor makes no commands; Active enables automatic control.",
-        },
-        *[schedule_card(day, entity_ids) for day in DAYS],
-    ]
-
     stats_cards = [
         {
             "type": "entities",
@@ -352,7 +409,7 @@ def dashboard_config(
     info = {"type": "markdown", "content":
         "**Charging-linked comfort** uses the same ready-by time as charging. "
         "Choose Cool/Warm on the charging schedule; its settings are on "
-        "Comfort Settings. **Simulation only.**"}
+        "Comfort Settings. **Scheduled climate commands are not enabled yet.**"}
     extra_sensors = extra_sensors or {}
     charger_sensors = charger_sensors or {}
 
@@ -531,16 +588,16 @@ def dashboard_config(
     ])
     all_climate = independent_climate_schedule_cards(entity_ids)
     return {
-        "title": "Geely EV Control Centre (Test)",
+        "title": "Geely EV Control Centre",
         "views": [
             {
-                "title": "Charging & Schedule",
+                "title": "EV Control",
                 "path": "charging",
                 "icon": "mdi:car-electric",
                 "type": "sections",
                 "max_columns": 2,
                 "sections": [
-                    _section(charging_cards + automatic_panel + live_panel),
+                    _section(charging_cards),
                     _section([charging_schedule_card(entity_ids), info]),
                 ],
             },
@@ -567,7 +624,7 @@ def dashboard_config(
                 ],
             },
             {
-                "title": "Vehicle Data",
+                "title": "EX5 Stats",
                 "path": "data",
                 "icon": "mdi:chart-box-outline",
                 "type": "sections",
