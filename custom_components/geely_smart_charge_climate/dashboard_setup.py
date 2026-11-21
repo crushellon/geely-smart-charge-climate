@@ -42,7 +42,6 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
         "live_test_status": ("sensor", f"{entry.entry_id}_live_test_status"),
         "automatic_charge_decision": ("sensor", f"{entry.entry_id}_automatic_charge_decision"),
         "public_charging_mode": ("switch", f"{entry.entry_id}_public_charging_mode"),
-        "live_test_armed": ("switch", f"{entry.entry_id}_live_test_armed"),
         "live_test_target": ("number", f"{entry.entry_id}_live_test_target"),
         "live_test_start": ("button", f"{entry.entry_id}_live_test_start"),
         "live_test_stop": ("button", f"{entry.entry_id}_live_test_stop"),
