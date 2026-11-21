@@ -390,7 +390,9 @@ class AutomaticChargeStatusSensor(SensorEntity):
             "linked_comfort_steering_heat": comfort["steering_heat"] if comfort else None,
             "linked_comfort_lead_minutes": comfort["lead_minutes"] if comfort else None,
             "linked_comfort_hold_minutes": comfort["hold_minutes"] if comfort else None,
-            "linked_comfort_commands_enabled": True,
+            "linked_comfort_commands_enabled": self.entry.options.get(
+                "scheduled_climate_enabled", False
+            ) is True,
             "stop_attempts": auto.stop_attempts,
             "stop_confirmation_pending": auto.stop_requested_at is not None,
             "stop_verification": (
