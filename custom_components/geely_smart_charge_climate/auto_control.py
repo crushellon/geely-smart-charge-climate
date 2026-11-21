@@ -294,7 +294,7 @@ class AutomaticChargeController:
             old_mode = self.mode
             self.mode = mode
             self.unexpected_since = None
-            if (mode == "Active" and old_mode != "Active"
+            if (mode == "Active" and deliberate and old_mode != "Active"
                     and not self.owned and self.stop_requested_at is None):
                 # For the temporary test UI, returning to Active is an
                 # explicit request to resume a previously stopped charge.
