@@ -120,6 +120,59 @@ class LiveChargeController:
             legacy_states=guards,
         )
 
+    def _save_options(self, **changes):
+        """Persist user preference/session snapshots, not transient mode."""
+        if hasattr(self.hass, "config_entries"):
+            self.hass.config_entries.async_update_entry(
+                self.entry, options={**self.entry.options, **changes}
+            )
+
+    def _remember_manual_session(self, active):
+        self._save_options(manual_session=(
+            {"active": True, "target": self.active_target,
+             "started_at": self.started_at.isoformat() if self.started_at else None}
+            if active else {"active": False}
+        ))
+
+    async def async_set_automatic_enabled(self, enabled):
+        """Automatic charging is persistent user intent, not a test mode."""
+        self._save_options(automatic_charging_enabled=bool(enabled))
+        await self.async_reconcile_automatic()
+
+    async def async_reconcile_automatic(self):
+        """After manual, emergency, public or restart restore user's intent."""
+        wanted = self.entry.options.get("automatic_charging_enabled", False) is True
+        blocked = (self.owned or self.armed or self.stop_requested_at is not None
+                   or self.public_mode()
+                   or self.entry.options.get("emergency_stop", False) is True)
+        target_mode = "Active" if wanted and not blocked else "Off"
+        if self.auto.mode != target_mode:
+            await self.auto.async_set_mode(target_mode)
+        elif target_mode == "Active":
+            await self.auto.async_tick()
+        self._notify()
+
+    async def async_restore(self):
+        """Reacquire manual observation without ever issuing a duplicate ON."""
+        saved = self.entry.options.get("manual_session", {})
+        if isinstance(saved, dict) and saved.get("active") is True:
+            target = saved.get("target")
+            if (isinstance(target, (int, float)) and not isinstance(target, bool)
+                    and 50 <= target <= 100):
+                self.owned = True
+                self.active_target = int(target)
+                try:
+                    self.started_at = datetime.fromisoformat(saved["started_at"])
+                except (KeyError, TypeError, ValueError):
+                    self.started_at = dt_util.utcnow()
+                self.observed_active = False
+                self.status = "RECOVERING"
+                self.message = "Recovering manual charge; no duplicate START"
+                self._notify()
+        await self.auto.async_restore()
+        await self.async_reconcile_automatic()
+        await self.scheduled_climate.async_tick()
+
     async def async_start_listening(self):
         entities = [self.battery, self.charging_switch, *MONITORED_GUARDS]
         if self.charging_power:
@@ -131,18 +184,17 @@ class LiveChargeController:
         def changed(_event):
             self.hass.async_create_task(self.async_tick())
             self.hass.async_create_task(self.auto.async_tick())
+            self.hass.async_create_task(self.scheduled_climate.async_tick())
 
         @callback
         def periodic(_now):
             self.hass.async_create_task(self.async_tick())
             self.hass.async_create_task(self.auto.async_tick())
+            self.hass.async_create_task(self.scheduled_climate.async_tick())
 
         async def options_changed(_hass, _entry):
-            # Every persisted schedule/comfort edit refreshes the live
-            # controller first, then notifies HA even when status is unchanged.
-            # This includes linked comfort/profile/timing edits, which do not
-            # command cabin climate in the experimental integration.
-            await self.auto.async_tick()
+            await self.async_reconcile_automatic()
+            await self.scheduled_climate.async_tick()
             self._notify()
 
         self._unsubs.append(
@@ -199,11 +251,12 @@ class LiveChargeController:
         self._notify()
 
     async def async_release_emergency_stop(self):
-        """Release latch without silently enabling charging."""
+        """Release the latch and restore the previously enabled schedule."""
         self.hass.config_entries.async_update_entry(
             self.entry,
             options={**self.entry.options, "emergency_stop": False},
         )
+        await self.async_reconcile_automatic()
         self._notify()
 
     async def async_start_manual(self, target=None):
@@ -226,6 +279,7 @@ class LiveChargeController:
         await self.async_start()
         if not self.owned:
             self.armed = False
+            await self.async_reconcile_automatic()
             self._notify()
 
     async def async_manual_climate(self, action):
@@ -238,7 +292,7 @@ class LiveChargeController:
             self._notify()
             return
         self.armed = False
-        await self.auto.async_set_mode("Active")
+        await self.async_set_automatic_enabled(True)
         self._notify()
 
     async def async_start(self):
@@ -278,6 +332,7 @@ class LiveChargeController:
             self.stop_watch_until = None
             self.active_target = self.target
             self.started_at = dt_util.utcnow()
+            self._remember_manual_session(True)
             self.observed_active = False
             self.stop_requested_at = None
             self.stop_attempts = 0
@@ -355,7 +410,10 @@ class LiveChargeController:
         self.off_observations = 0
         self.status = status
         self.message = message
+        self._remember_manual_session(False)
         self._notify()
+        if hasattr(self.hass, "async_create_task"):
+            self.hass.async_create_task(self.async_reconcile_automatic())
 
     def _power_active(self):
         if not self.charging_power:
