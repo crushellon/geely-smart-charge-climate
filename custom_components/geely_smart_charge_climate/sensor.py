@@ -22,6 +22,7 @@ from .rate_learning import RateLearner, effective_fallback_kw
 from .discovery import discover_plug_entity
 from .simulator import simulate
 from .weekly_schedule import next_charge
+from .climate_schedule import next_event
 
 
 async def async_setup_entry(
@@ -33,6 +34,7 @@ async def async_setup_entry(
     async_add_entities([
         GeelyObservationSensor(hass, entry),
         GeelySimulationSensor(hass, entry),
+        ClimateNextSessionSensor(hass, entry),
     ])
 
 
@@ -226,6 +228,54 @@ class GeelySimulationSensor(GeelyObservedBase):
         )
 
         def minute_tick(now) -> None:
+            self.async_write_ha_state()
+
+        self.async_on_remove(
+            async_track_time_interval(self.hass, minute_tick, timedelta(minutes=1))
+        )
+
+
+class ClimateNextSessionSensor(SensorEntity):
+    """Show hypothetical next climate session; never control the vehicle."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Next climate session"
+    _attr_icon = "mdi:car-defrost-front"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self.hass = hass
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_climate_next"
+
+    @property
+    def native_value(self) -> str:
+        session = next_event(dt_util.now(), self.entry.options)
+        return f"Slot {session['slot']}" if session else "NO_SCHEDULE"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        session = next_event(dt_util.now(), self.entry.options)
+        if not session:
+            return {"simulation_only": True, "vehicle_commands_sent": False,
+                    "reason": "No climate slots enabled"}
+        return {
+            "simulation_only": True,
+            "vehicle_commands_sent": False,
+            "slot": session["slot"],
+            "day": session["day"],
+            "ready_by": session["ready_by"].isoformat(),
+            "start_at": session["start_at"].isoformat(),
+            "end_at": session["end_at"].isoformat(),
+            "temperature": session["temperature"],
+            "driver_seat": session["driver_seat"],
+            "passenger_seat": session["passenger_seat"],
+            "steering_heat": session["steering_heat"],
+        }
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+
+        def minute_tick(now):
             self.async_write_ha_state()
 
         self.async_on_remove(
