@@ -277,6 +277,7 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
             _LOGGER.info("Four-page dashboard was customized; preserving layout")
             return
         await _refresh_generated_dashboard(hass, entry, stored_dashboard)
+        await _rename_generated_dashboard(hass)
         return
     if paths != ["charging", "climate", "schedule", "statistics"]:
         _LOGGER.info("Test dashboard was customized; preserving current layout")
@@ -344,7 +345,7 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
         (item for item in collection.async_items()
          if item.get("url_path") == DASHBOARD_PATH), None
     )
-    if stored and stored.get("title") in ("EV Control Centre", "Geely EV Control Centre"):
+    if stored and stored.get("title") in ("EV Control Centre", "Geely EV Control Centre (Test)"):
         await collection.async_update_item(
             stored["id"], {"title": "Geely EV Control Centre"}
         )
@@ -358,6 +359,35 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
                 config={"mode": "storage"}, update=True,
             )
     _LOGGER.info("Migrated generated test dashboard to four focused pages")
+
+
+async def _rename_generated_dashboard(hass) -> None:
+    """Remove the development suffix from the integration-generated sidebar.
+
+    Only known old titles are migrated. Never rename a user-created dashboard.
+    """
+    try:
+        collection = DashboardsCollection(hass)
+        await collection.async_load()
+        stored = next(
+            (item for item in collection.async_items()
+             if item.get("url_path") == DASHBOARD_PATH), None,
+        )
+        if stored and stored.get("title") == "Geely EV Control Centre (Test)":
+            await collection.async_update_item(
+                stored["id"], {"title": "Geely EV Control Centre"}
+            )
+            if frontend.async_panel_exists(hass, DASHBOARD_PATH):
+                frontend.async_register_built_in_panel(
+                    hass, "lovelace",
+                    frontend_url_path=DASHBOARD_PATH,
+                    require_admin=False, show_in_sidebar=True,
+                    sidebar_title="Geely EV Control Centre",
+                    sidebar_icon="mdi:ev-station",
+                    config={"mode": "storage"}, update=True,
+                )
+    except Exception:
+        _LOGGER.exception("Could not rename generated EV dashboard")
 
 
 def _is_generated_four_page_dashboard(views) -> bool:
