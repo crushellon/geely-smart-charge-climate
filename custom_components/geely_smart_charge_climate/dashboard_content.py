@@ -149,7 +149,6 @@ def dashboard_config(
     Dashboard controls are real user features; they call guarded Geely
     actions. Diagnostic/test functions are not part of this dashboard.
     """
-    status = entity_ids["observer_status"]
     simulation = entity_ids["simulation_decision"]
     vehicle_status = entity_ids["vehicle_charging_status"]
 
@@ -296,39 +295,6 @@ def dashboard_config(
         manual_buttons, manual_climate, manual_climate_buttons,
     ]
 
-    stats_cards = [
-        {
-            "type": "entities",
-            "title": "Simulation status",
-            "show_header_toggle": False,
-            "entities": [status, simulation, battery]
-            + ([charging_power] if charging_power else []),
-        },
-        {
-            "type": "markdown",
-            "content": "### Charging-rate learning\n"
-            f"Charger rated power: **{{{{ state_attr('{simulation}', 'charger_rated_kw') }}}} kW**  \n"
-            f"Rate source: **{{{{ state_attr('{simulation}', 'charge_rate_source') }}}}**  \n"
-            f"Learned rate: **{{{{ state_attr('{simulation}', 'learned_percentage_points_per_hour') or 'Not yet learned' }}}} %/hr**  \n"
-            f"Samples: **{{{{ state_attr('{simulation}', 'learning_sample_count') or 0 }}}}**",
-        },
-        {
-            "type": "history-graph",
-            "title": "Battery history",
-            "hours_to_show": 48,
-            "entities": [battery],
-        },
-    ]
-    if charging_power:
-        stats_cards.append(
-            {
-                "type": "history-graph",
-                "title": "Charging power history",
-                "hours_to_show": 48,
-                "entities": [charging_power],
-            }
-        )
-
     comfort_timing = {
         "type": "entities",
         "title": "Charging-linked cabin comfort timing",
@@ -424,8 +390,9 @@ def dashboard_config(
         heading("Charging telemetry", "mdi:ev-station"),
         {"type": "entities", "title": "Live charging status",
          "show_header_toggle": False, "entities":
-         [battery] + ([plug] if plug else [])
-         + ([charging_power] if charging_power else []) + [status, simulation]},
+         [entity_ids["vehicle_charging_status"], battery]
+         + ([plug] if plug else [])
+         + ([charging_power] if charging_power else [])},
     ]
 
     # Keep each useful section immediately under its own heading. Empty
@@ -509,17 +476,6 @@ def dashboard_config(
             "type": "history-graph", "title": "Charging power — 24 hours",
             "hours_to_show": 24, "entities": power_series,
         })
-    right_cards.extend([
-        heading("Charge planning diagnostics", "mdi:information-outline"),
-        {
-            "type": "markdown",
-            "content": "### Charging-rate learning\n"
-            f"Charger rating: **{{{{ state_attr('{simulation}', 'charger_rated_kw') }}}} kW**  \n"
-            f"Rate source: **{{{{ state_attr('{simulation}', 'charge_rate_source') }}}}**  \n"
-            f"Learned rate: **{{{{ state_attr('{simulation}', 'learned_percentage_points_per_hour') or 'Not yet learned' }}}} %/hr**  \n"
-            f"Samples: **{{{{ state_attr('{simulation}', 'learning_sample_count') or 0 }}}}",
-        },
-    ])
     all_climate = independent_climate_schedule_cards(entity_ids)
     return {
         "title": "Geely EV Control Centre",
