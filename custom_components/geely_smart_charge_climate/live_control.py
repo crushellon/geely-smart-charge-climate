@@ -288,6 +288,13 @@ class LiveChargeController:
             self._notify()
 
     async def async_manual_climate(self, action):
+        if (action != "off" and (
+                self.entry.options.get("emergency_stop", False) is True
+                or self._raw(EMERGENCY_STOP) == "on")):
+            self.climate.status = "BLOCKED"
+            self.climate.message = "Release Emergency Stop before activating cabin climate"
+            self._notify()
+            return
         await self.scheduled_climate.async_manual_override(action)
         await self.climate.apply(action)
 
