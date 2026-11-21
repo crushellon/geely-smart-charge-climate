@@ -118,9 +118,13 @@ def _optional_vehicle_sensors(hass, entry) -> dict[str, str]:
         if (
             entity is not None
             and entity.disabled_by is None
-            and entity.config_entry_id == battery.config_entry_id
-            and (not battery.device_id or not entity.device_id
-                 or battery.device_id == entity.device_id)
+            and (
+                (battery.device_id and entity.device_id == battery.device_id)
+                or (
+                    battery.config_entry_id
+                    and entity.config_entry_id == battery.config_entry_id
+                )
+            )
         ):
             result[key] = entity_id
     return result
@@ -207,6 +211,11 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
         return
     paths = [v.get("path") for v in views]
     if paths == ["charging", "comfort", "climate-scheduler", "data"]:
+        # Refresh generated layouts in place for updated styling and telemetry.
+        if not _is_generated_four_page_dashboard(views):
+            _LOGGER.info("Four-page dashboard was customized; preserving layout")
+            return
+        await _refresh_generated_dashboard(hass, entry, stored_dashboard)
         return
     if paths != ["charging", "climate", "schedule", "statistics"]:
         _LOGGER.info("Test dashboard was customized; preserving current layout")
@@ -260,6 +269,7 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
         battery=entry.data[CONF_BATTERY_ENTITY],
         plug=discover_plug_entity(hass, entry.data[CONF_BATTERY_ENTITY]),
         charging_power=entry.data.get(CONF_CHARGING_POWER),
+        extra_sensors=_optional_vehicle_sensors(hass, entry),
     )
     await stored_dashboard.async_save(new_config)
 
@@ -283,3 +293,52 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
                 config={"mode": "storage"}, update=True,
             )
     _LOGGER.info("Migrated generated test dashboard to four focused pages")
+
+
+def _is_generated_four_page_dashboard(views) -> bool:
+    """Only allow auto-refresh of layouts produced by this integration."""
+    try:
+        left = views[0]["sections"][0]["cards"]
+        right = views[0]["sections"][1]["cards"]
+        comfort = views[1]["sections"][1]["cards"]
+        slots = [
+            card for section in views[2]["sections"]
+            for card in section["cards"]
+            if card.get("title", "").startswith("Climate schedule ")
+        ]
+    except (KeyError, IndexError, TypeError):
+        return False
+    return (
+        len(views) == 4
+        and len(left) >= 4
+        and left[0].get("type") == "markdown"
+        and "Geely Smart Charge & Climate" in left[0].get("content", "")
+        and bool(right)
+        and right[0].get("title") == "Seven-day charging schedule"
+        and len(slots) == 7
+        and len(comfort) >= 3
+        and [card.get("title") for card in comfort[-2:]]
+        == ["Cool profile", "Warm profile"]
+    )
+
+
+async def _refresh_generated_dashboard(hass, entry, stored_dashboard) -> None:
+    """Update our known generated layout; never rewrite other dashboards."""
+    ids = _dashboard_entity_ids(hass, entry)
+    if ids is None:
+        return
+    new_config = dashboard_config(
+        ids,
+        battery=entry.data[CONF_BATTERY_ENTITY],
+        plug=discover_plug_entity(hass, entry.data[CONF_BATTERY_ENTITY]),
+        charging_power=entry.data.get(CONF_CHARGING_POWER),
+        extra_sensors=_optional_vehicle_sensors(hass, entry),
+    )
+    try:
+        old = await stored_dashboard.async_load(False)
+        # Avoid redundant disk writes on ordinary integration reloads.
+        if old != new_config:
+            await stored_dashboard.async_save(new_config)
+            _LOGGER.info("Refreshed generated Geely dashboard and Vehicle Data")
+    except Exception:
+        _LOGGER.exception("Could not refresh the generated dashboard")
