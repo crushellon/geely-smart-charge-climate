@@ -44,6 +44,8 @@ class AutomaticChargeController:
         self.status = "OFF"
         self.message = "Automatic controller is off"
         self.decision = None
+        if self.owned and self.owned_day and self.owned_deadline:
+            self.completed_deadlines.add((self.owned_day, self.owned_deadline.isoformat()))
         self.owned = False
         self.owned_target = None
         self.owned_day = None
@@ -56,6 +58,7 @@ class AutomaticChargeController:
         self.stop_attempts = 0
         self.stop_context = ""
         self.last_event = "No automatic charging action"
+        self.completed_deadlines = set()
         self._lock = asyncio.Lock()
         self._last_notification = None
 
@@ -188,6 +191,10 @@ class AutomaticChargeController:
     async def _request_start(self, plan):
         """Issue one start only after positive safety and home verification."""
         if self.mode != "Active" or self.manual.armed or self.manual.owned:
+            return
+        deadline_key = (plan.day, plan.ready_by.isoformat())
+        if deadline_key in self.completed_deadlines:
+            self._update("COMPLETED", "This scheduled charging session already ended")
             return
         if not self._legacy_clear() or self._home() is not True:
             self._update("BLOCKED", "Cannot start: controller/home interlock")
