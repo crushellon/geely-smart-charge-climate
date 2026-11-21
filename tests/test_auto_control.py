@@ -170,6 +170,18 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.services.calls, [])
         self.assertEqual(self.auto.status, "UNKNOWN")
 
+    async def test_emergency_stops_unowned_home_charge_immediately(self):
+        self.entry.options["weekly_schedule"] = {}
+        self.values["switch.car"] = "on"
+        self.values["sensor.power"] = "6"
+        self.values[safety.EMERGENCY_STOP] = "on"
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_off"])
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+
     async def test_public_mode_prevents_commands(self):
         self.values[safety.PUBLIC_MODE] = "on"
         await self.auto.async_set_mode("Active")
