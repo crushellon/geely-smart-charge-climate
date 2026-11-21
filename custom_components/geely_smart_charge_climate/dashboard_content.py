@@ -300,68 +300,6 @@ def dashboard_config(
          "Linked and independent climate schedules do not yet send commands."},
     ]
 
-    # Use Markdown instead of a switch entity row to prevent accidental toggles.
-    status_line = (
-        f"**Geely charging:** {{{{ states('{charging_switch}') | title }}}}  \n"
-        if charging_switch else "**Geely charging:** Not configured  \n"
-    )
-    power_line = (
-        f"**Charging power:** {{{{ states('{charging_power}') }}}} "
-        f"{{{{ state_attr('{charging_power}', 'unit_of_measurement') or 'kW' }}}}  \n"
-        if charging_power else "**Charging power:** Not configured  \n"
-    )
-    plug_line = (
-        f"**Cable connected:** {{{{ states('{plug}') | title }}}}  \n"
-        if plug else "**Cable connected:** Not detected  \n"
-    )
-    live_status_card = {
-        "type": "markdown",
-        "content": "### Live Geely charging status\n"
-        + f"**Battery:** {{{{ states('{battery}') }}}}%  \n"
-        + status_line + power_line + plug_line
-        + "*Read-only telemetry; use the armed live-test controls below.*",
-    }
-
-    charging_cards = [
-        {
-            "type": "markdown",
-            "content": "## Geely Smart Charge & Climate\n"
-            "**Climate remains simulation-only.** Charging commands require explicit "
-            "manual arming or Active automatic mode; Monitor is read-only. "
-            "**Turn Public charging mode ON before connecting to a public charger; "
-            "turn it OFF at home. No location is detected automatically.** "
-            "Keep your old controller disabled during testing.",
-        },
-        {"type": "gauge", "entity": battery, "name": "Battery", "min": 0, "max": 100},
-        live_status_card,
-        {
-            "type": "entities",
-            "title": "Vehicle and connection",
-            "show_header_toggle": False,
-            "entities": (
-                [battery]
-                + ([plug] if plug else [])
-                + ([charging_power] if charging_power else [])
-                + [status]
-            ),
-        },
-        {
-            "type": "entity",
-            "entity": simulation,
-            "name": "Next charging simulation",
-            "icon": "mdi:calendar-clock",
-        },
-        {
-            "type": "markdown",
-            "content": "### Simulated planning\n"
-            f"Next scheduled day: **{{{{ state_attr('{simulation}', 'next_schedule_day') or 'None' }}}}**  \n"
-            f"Battery target: **{{{{ state_attr('{simulation}', 'target_percent') or '—' }}}}%**  \n"
-            f"Ready by: **{{{{ state_attr('{simulation}', 'ready_by') or '—' }}}}**  \n"
-            f"Estimated start: **{{{{ state_attr('{simulation}', 'estimated_start') or '—' }}}}**  \n"
-            f"Reason: {{{{ state_attr('{simulation}', 'reason') or '—' }}}}",
-        },
-    ]
-
     stats_cards = [
         {
             "type": "entities",
