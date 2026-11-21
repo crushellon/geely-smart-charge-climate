@@ -55,8 +55,9 @@ def comfort_cards(entity_ids: dict[str, str]) -> list[dict]:
     result.append({
         "type": "markdown",
         "content": "Comfort preferences are saved here. Manual Cool/Warm buttons "
-        "on EV Control can send Geely commands. Scheduled climate and "
-        "charging-linked preconditioning are still being developed.",
+        "on EV Control send Geely commands. Charging-linked and independent "
+        "climate schedules now run automatically when enabled. Manual "
+        "climate commands take priority over the current scheduled session.",
     })
     return result
 
