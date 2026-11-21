@@ -120,6 +120,7 @@ def dashboard_config(
     plug: str | None = None,
     charging_power: str | None = None,
     extra_sensors: dict[str, str] | None = None,
+    charger_sensors: dict[str, str] | None = None,
 ) -> dict:
     """Construct a native, mobile-friendly four-view Lovelace dashboard.
 
@@ -227,6 +228,7 @@ def dashboard_config(
         "Choose Cool/Warm on the charging schedule; its settings are on "
         "Comfort Settings. **Simulation only.**"}
     extra_sensors = extra_sensors or {}
+    charger_sensors = charger_sensors or {}
 
     def heading(title, icon):
         return {
@@ -344,15 +346,51 @@ def dashboard_config(
         if grid["cards"]:
             right_cards.extend([heading(title, icon), grid])
 
+    if charger_sensors:
+        charger_rows = [
+            {"entity": charger_sensors[key], "name": name}
+            for key, name in (
+                ("connected", "Wall Connector vehicle connected"),
+                ("status", "Wall Connector status"),
+                ("session_energy", "Current session energy"),
+                ("energy", "Total delivered energy"),
+            )
+            if key in charger_sensors
+        ]
+        if charger_rows:
+            right_cards.extend([
+                heading("Wall Connector", "mdi:ev-plug-type2"),
+                {"type": "entities", "title": "Optional charger telemetry",
+                 "show_header_toggle": False, "entities": charger_rows},
+            ])
+        if "power" in charger_sensors:
+            vehicle_cards.extend([
+                heading("Charger power", "mdi:flash"),
+                {"type": "grid", "columns": 2, "square": False,
+                 "cards": (
+                    [{"type": "gauge", "entity": charging_power,
+                      "name": "GEELY CHARGING", "min": 0, "max": 11,
+                      "needle": True}] if charging_power else []
+                 ) + [
+                    {"type": "gauge", "entity": charger_sensors["power"],
+                     "name": "WALL CONNECTOR", "min": 0, "max": 11,
+                     "needle": True},
+                 ]},
+            ])
+
     right_cards.extend([
         heading("Energy & battery history", "mdi:chart-line"),
         {"type": "history-graph", "title": "Battery level — 7 days",
          "hours_to_show": 168, "entities": [battery]},
     ])
-    if charging_power:
+    power_series = (
+        ([charging_power] if charging_power else [])
+        + ([charger_sensors["power"]] if "power" in charger_sensors else [])
+    )
+    if power_series:
         right_cards.append({
             "type": "history-graph", "title": "Charging power — 24 hours",
-            "hours_to_show": 24, "entities": [charging_power],
+            "hours_to_show": 24, "entities": power_series,
         })
     right_cards.extend([
         heading("Charge planning diagnostics", "mdi:information-outline"),
