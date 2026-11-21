@@ -33,6 +33,11 @@ class DashboardTests(unittest.TestCase):
                 self.ids[f"{profile}_{occupant}_seat_mode"] = f"select.{profile}_{occupant}_seat_mode"
             self.ids[f"{profile}_steering_toggle"] = f"switch.{profile}_steering_toggle"
             self.ids[f"show_{profile}_settings"] = f"switch.show_{profile}_settings"
+        for day in module.DAYS:
+            self.ids[f"{day}_linked_comfort_enabled"] = f"switch.{day}_linked_comfort_enabled"
+            self.ids[f"{day}_linked_comfort_profile"] = f"select.{day}_linked_comfort_profile"
+        self.ids["linked_comfort_lead_minutes"] = "number.linked_comfort_lead_minutes"
+        self.ids["linked_comfort_hold_minutes"] = "number.linked_comfort_hold_minutes"
         self.ids["climate_next"] = "sensor.climate_next"
         for slot in range(1, 8):
             for field, prefix in (
@@ -51,39 +56,57 @@ class DashboardTests(unittest.TestCase):
             "sensor.my_geely_ex5_4034_charging_power",
         )
 
-    def test_four_views(self):
+    def test_four_focused_views(self):
         self.assertEqual(
             [v["path"] for v in self.config["views"]],
-            ["charging", "climate", "schedule", "statistics"],
+            ["charging", "comfort", "climate-scheduler", "data"],
+        )
+        self.assertEqual(
+            [v["title"] for v in self.config["views"]],
+            ["Charging & Schedule", "Comfort Settings", "Climate Scheduler", "Vehicle Data"],
+        )
+        for view in self.config["views"]:
+            self.assertEqual(view["type"], "sections")
+            self.assertEqual(len(view["sections"]), 2)
+
+    def test_cool_warm_directly_visible(self):
+        sections = self.config["views"][1]["sections"]
+        cards = sections[1]["cards"]
+        self.assertEqual([c["title"] for c in cards[1:]],
+                         ["Cool profile", "Warm profile"])
+        self.assertNotIn("conditional", [c["type"] for c in cards])
+        self.assertIn(
+            "select.cool_driver_seat_mode",
+            [r["entity"] for r in cards[1]["entities"]],
         )
 
-    def test_climate_comfort_controls(self):
-        climate = self.config["views"][1]["cards"]
-        self.assertEqual(len(climate), 14)
-        self.assertEqual(climate[2]["type"], "conditional")
-        self.assertEqual(climate[4]["type"], "conditional")
-        cool = [item["entity"] for item in climate[2]["card"]["entities"]]
-        warm = [item["entity"] for item in climate[4]["card"]["entities"]]
-        self.assertIn("number.cool_temperature", cool)
-        self.assertIn("select.cool_driver_seat_mode", cool)
-        self.assertIn("select.warm_passenger_seat_mode", warm)
-        self.assertIn("switch.warm_steering_toggle", warm)
-        self.assertEqual(climate[2]["conditions"][0]["entity"], "switch.show_cool_settings")
-        self.assertEqual(climate[7]["title"], "Climate schedule 1")
-        self.assertEqual(climate[13]["title"], "Climate schedule 7")
+    def test_charging_schedule_single_card(self):
+        sections = self.config["views"][0]["sections"]
+        cards = sections[1]["cards"]
+        self.assertEqual(cards[0]["title"], "Seven-day charging schedule")
+        rows = cards[0]["entities"]
+        self.assertEqual(len(rows), 7 * 6)
+        self.assertEqual(rows[0]["label"], "Sunday night → Monday")
+        self.assertEqual(rows[1]["entity"], "switch.monday_enabled")
+        self.assertEqual(rows[4]["entity"], "switch.monday_linked_comfort_enabled")
+        self.assertEqual(rows[5]["entity"], "select.monday_linked_comfort_profile")
+
+    def test_seven_independent_climate_slots_on_own_page(self):
+        sections = self.config["views"][2]["sections"]
+        all_cards = sum((section["cards"] for section in sections), [])
+        slots = [c for c in all_cards
+                 if c.get("title", "").startswith("Climate schedule ")]
+        self.assertEqual(len(slots), 7)
+        self.assertEqual(
+            [c["title"] for c in slots],
+            ["Climate schedule 1", "Climate schedule 3", "Climate schedule 5",
+             "Climate schedule 7", "Climate schedule 2", "Climate schedule 4",
+             "Climate schedule 6"],
+        )
         self.assertIn(
             "select.climate_slot_1_driver_seat",
-            [row["entity"] for row in climate[7]["entities"] if "entity" in row],
+            [r["entity"] for r in slots[0]["entities"] if "entity" in r],
         )
-
-    def test_seven_editable_day_cards(self):
-        schedule = self.config["views"][2]["cards"]
-        self.assertEqual(len(schedule), 8)
-        for day, card in zip(module.DAYS, schedule[1:]):
-            self.assertEqual(
-                [item["entity"] for item in card["entities"]],
-                [self.ids[f"{day}_{r}"] for r in ("enabled", "target", "ready_time")],
-            )
 
     def test_never_exposes_vehicle_charging_switch_as_control(self):
         from json import dumps
@@ -97,10 +120,11 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(len(result["views"]), 4)
 
     def test_uses_only_native_cards(self):
-        native = {"markdown", "gauge", "entities", "entity", "history-graph", "conditional"}
+        native = {"markdown", "gauge", "entities", "entity", "history-graph"}
         for view in self.config["views"]:
-            for card in view["cards"]:
-                self.assertIn(card["type"], native)
+            for section in view["sections"]:
+                for card in section["cards"]:
+                    self.assertIn(card["type"], native)
 
 
 if __name__ == "__main__":
