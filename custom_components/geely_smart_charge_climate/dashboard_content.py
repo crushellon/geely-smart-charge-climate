@@ -131,6 +131,59 @@ def dashboard_config(
     status = entity_ids["observer_status"]
     simulation = entity_ids["simulation_decision"]
 
+    live_panel = [
+        {
+            "type": "markdown",
+            "content": "### Live manual charging test\n"
+            "**Opt-in test only.** The new controller does not run schedules "
+            "or climate. First disable your old charging controller and verify "
+            "it is inactive. Then arm this test and use Start. "
+            "Stay present for the first short charge.",
+        },
+        {
+            "type": "entities",
+            "title": "Manual test and safety",
+            "show_header_toggle": False,
+            "entities": [
+                {"entity": entity_ids["live_test_status"], "name": "Test status"},
+                {"entity": entity_ids["live_test_armed"], "name": "Arm live test"},
+                {"entity": entity_ids["live_test_target"], "name": "Test battery target"},
+            ],
+        },
+        {
+            "type": "grid",
+            "columns": 2,
+            "square": False,
+            "cards": [
+                {
+                    "type": "button",
+                    "entity": entity_ids["live_test_start"],
+                    "name": "Start test",
+                    "icon": "mdi:play-circle",
+                    "tap_action": {
+                        "action": "perform-action",
+                        "perform_action": "button.press",
+                        "target": {"entity_id": entity_ids["live_test_start"]},
+                        "confirmation": {
+                            "text": "Start a real Geely charge? Old charging control must be disabled."
+                        },
+                    },
+                },
+                {
+                    "type": "button",
+                    "entity": entity_ids["live_test_stop"],
+                    "name": "Stop test",
+                    "icon": "mdi:stop-circle",
+                    "tap_action": {
+                        "action": "perform-action",
+                        "perform_action": "button.press",
+                        "target": {"entity_id": entity_ids["live_test_stop"]},
+                    },
+                },
+            ],
+        },
+    ]
+
     charging_cards = [
         {
             "type": "markdown",
@@ -414,7 +467,7 @@ def dashboard_config(
                 "type": "sections",
                 "max_columns": 2,
                 "sections": [
-                    _section(charging_cards),
+                    _section(charging_cards + live_panel),
                     _section([charging_schedule_card(entity_ids), info]),
                 ],
             },
