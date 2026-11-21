@@ -16,6 +16,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_BATTERY_ENTITY, CONF_CHARGING_SWITCH, CONF_CHARGING_POWER
 from .discovery import discover_plug_entity, discover_charging_power_entity
+from .auto_control import AutomaticChargeController
 from .live_safety import (
     EMERGENCY_STOP, LEGACY_ACTIVE, LEGACY_CONTROLLER, OLD_FULL_CHARGE,
     PUBLIC_MODE, start_preflight, should_stop_owned_session,
@@ -54,6 +55,7 @@ class LiveChargeController:
         self._lock = asyncio.Lock()
         self._callbacks = []
         self._unsubs = []
+        self.auto = AutomaticChargeController(self)
 
     def listen(self, callback_fn):
         self._callbacks.append(callback_fn)
@@ -111,6 +113,7 @@ class LiveChargeController:
         @callback
         def changed(_event):
             self.hass.async_create_task(self.async_tick())
+            self.hass.async_create_task(self.auto.async_tick())
 
         @callback
         def periodic(_now):
@@ -142,6 +145,11 @@ class LiveChargeController:
 
     async def async_start(self):
         async with self._lock:
+            if self.auto.owned or self.auto.stop_requested_at is not None:
+                self.status = "BLOCKED"
+                self.message = "Automatic controller has an active session or stop request"
+                self._notify()
+                return
             if self.owned:
                 self.message = "Already managing a live test session"
                 self._notify()
@@ -315,6 +323,7 @@ class LiveChargeController:
                 return
 
     async def async_shutdown(self):
+        await self.auto.async_shutdown()
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
