@@ -517,6 +517,21 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.services.calls, ["turn_on", "turn_on"])
         self.assertEqual(self.auto.owned_target, 80)
 
+    async def test_finished_product_resume_rearms_while_auto_already_enabled(self):
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_tick()
+        self.values["switch.car"] = "off"
+        self.values["sensor.power"] = "0"
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "INTERRUPTED")
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "PAUSED")
+        # No developer Off/Active toggle: production button invokes this.
+        await self.auto.async_request_resume()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_on"])
+        self.assertTrue(self.auto.owned)
+
     async def test_stopped_below_new_100_target_can_start_again(self):
         # Recreate user journey: reach 79%, stop; update departure to 100%.
         self.entry.options["weekly_schedule"]["monday"]["target"] = 79
