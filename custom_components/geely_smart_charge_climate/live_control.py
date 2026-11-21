@@ -6,6 +6,7 @@ explicitly arms AND presses Start test. Never controls Tesla wallboxes.
 import asyncio
 from datetime import timedelta
 import logging
+from math import isfinite
 
 from homeassistant.core import callback
 from homeassistant.helpers.event import (
@@ -83,10 +84,11 @@ class LiveChargeController:
         power = self._raw(self.charging_power)
         if self.charging_power:
             try:
-                if float(power) > 0.25:
-                    return "Geely reports charging power already flowing"
-                if float(power) < 0:
+                measured_kw = float(power)
+                if not isfinite(measured_kw) or measured_kw < 0:
                     return "Charging power reading invalid"
+                if measured_kw > 0.25:
+                    return "Geely reports charging power already flowing"
             except (ValueError, TypeError):
                 return "Charging power unavailable: refresh vehicle data"
         return start_preflight(
@@ -231,10 +233,15 @@ class LiveChargeController:
 
     def _stopped_state(self):
         """Require positive switch OFF plus no known charging power."""
-        return (
-            self._raw(self.charging_switch) == "off"
-            and not self._power_active()
-        )
+        if self._raw(self.charging_switch) != "off":
+            return False
+        if not self.charging_power:
+            return True
+        try:
+            power = float(self._raw(self.charging_power))
+            return isfinite(power) and 0 <= power <= 0.25
+        except (TypeError, ValueError):
+            return False  # Unknown power is not positive stop confirmation.
 
     async def async_stop(self):
         async with self._lock:
