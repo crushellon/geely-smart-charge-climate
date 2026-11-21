@@ -14,6 +14,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
           ("start", "stop", "quick80", "quick100", "resume")],
         EmergencyActionButton(entry, "stop"),
         EmergencyActionButton(entry, "release"),
+        *[ManualClimateButton(entry, action) for action in
+          ("Cool", "Warm", "custom", "off")],
     ])
 
 
@@ -89,3 +91,24 @@ class EmergencyActionButton(ButtonEntity):
             await runtime.async_emergency_stop()
         else:
             await runtime.async_release_emergency_stop()
+
+
+class ManualClimateButton(ButtonEntity):
+    """User-operated Geely climate preset; not a scheduled climate command."""
+
+    _attr_has_entity_name = True
+
+    def __init__(self, entry, action):
+        self.entry = entry
+        self.action = action
+        names = {
+            "Cool": ("Comfort Cool", "mdi:snowflake"),
+            "Warm": ("Comfort Warm", "mdi:weather-sunny"),
+            "custom": ("Custom temperature ON", "mdi:thermometer"),
+            "off": ("Climate + seats OFF", "mdi:power"),
+        }
+        self._attr_unique_id = f"{entry.entry_id}_manual_climate_{action.lower()}"
+        self._attr_name, self._attr_icon = names[action]
+
+    async def async_press(self):
+        await self.entry.runtime_data.async_manual_climate(self.action)
