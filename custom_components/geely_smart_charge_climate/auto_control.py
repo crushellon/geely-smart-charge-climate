@@ -46,11 +46,6 @@ class AutomaticChargeController:
         self.status = "OFF"
         self.message = "Automatic controller is off"
         self.decision = None
-        if state == "STOPPED" and self.stop_started_at is not None:
-            # A delayed start may arrive AFTER apparently valid stop
-            # feedback. Continue watching only this integration-owned
-            # cancellation for a bounded period, even while mode is Off.
-            self.stop_watch_until = dt_util.utcnow() + STOP_WATCH
         self.owned = False
         self.owned_target = None
         self.owned_day = None
@@ -385,6 +380,9 @@ class AutomaticChargeController:
                 (self.owned_day, self.owned_deadline.date().isoformat())
             ] = {"target": self.owned_target, "soc": soc, "outcome": outcome}
 
+        if state == "STOPPED" and self.stop_started_at is not None:
+            # Watch for a delayed Geely start even after valid stop feedback.
+            self.stop_watch_until = dt_util.utcnow() + STOP_WATCH
         self.owned = False
         self.owned_target = None
         self.owned_day = None
