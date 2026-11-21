@@ -78,7 +78,7 @@ def independent_climate_schedule_cards(entity_ids: dict[str, str]) -> list[dict]
         {
             "type": "entity",
             "entity": entity_ids["climate_next"],
-            "name": "Next climate schedule (simulation)",
+            "name": "Next independent climate appointment",
         },
     ]
     for slot in range(1, 8):
