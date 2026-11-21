@@ -76,6 +76,25 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         o = slots.update_slot(o, 1, "hold_minutes", 10)
         self.entry.options = o
 
+    async def test_simulation_migration_does_not_activate_climate_without_optin(self):
+        self.configure_independent()
+        self.entry.options["scheduled_climate_enabled"] = False
+        await self.controller.async_tick()
+        self.assertEqual(self.controller.status, "DISABLED")
+        self.assertEqual(self.climate.calls, [])
+        self.entry.options["scheduled_climate_enabled"] = True
+        await self.controller.async_tick()
+        self.assertEqual([x[0] for x in self.climate.calls], ["on"])
+
+    async def test_disabling_master_while_climate_active_sends_off(self):
+        self.configure_independent()
+        await self.controller.async_tick()
+        self.entry.options["scheduled_climate_enabled"] = False
+        await self.controller.async_tick()
+        self.assertEqual([x[0] for x in self.climate.calls], ["on", "off"])
+        await self.controller.async_tick()
+        self.assertEqual(self.controller.status, "DISABLED")
+
     async def test_independent_start_once_and_stop_after_hold(self):
         self.configure_independent()
         await self.controller.async_tick()
