@@ -55,10 +55,10 @@ def independent_climate_schedule_cards(entity_ids: dict[str, str]) -> list[dict]
     cards = [
         {
             "type": "markdown",
-            "content": "## Independent cabin comfort\\n"
+            "content": "## Independent cabin comfort\n"
             "Seven independent, once-per-week schedule slots. They do not "
             "depend on charging or being plugged in. Multiple slots may "
-            "share the same weekday. All slots start disabled.\\n\\n"
+            "share the same weekday. All slots start disabled.\n\n"
             "**Simulation only:** no vehicle climate commands are sent.",
         },
         {
@@ -289,8 +289,8 @@ def dashboard_config(
     # the main stats page primarily vehicle telemetry.
     vehicle_cards = [
         {"type": "markdown", "content":
-         "# ⚡ GEELY EX5\\n"
-         "**Vehicle telemetry · Battery · Charging · Health**\\n\\n"
+         "# ⚡ GEELY EX5\n"
+         "**Vehicle telemetry · Battery · Charging · Health**\n\n"
          "*Read-only status. No vehicle commands are sent.*"},
         {
             "type": "grid", "columns": 2, "square": False, "cards": [
@@ -396,10 +396,10 @@ def dashboard_config(
         heading("Charge planning diagnostics", "mdi:information-outline"),
         {
             "type": "markdown",
-            "content": "### Charging-rate learning\\n"
-            f"Charger rating: **{{{{ state_attr('{simulation}', 'charger_rated_kw') }}}} kW**  \\n"
-            f"Rate source: **{{{{ state_attr('{simulation}', 'charge_rate_source') }}}}**  \\n"
-            f"Learned rate: **{{{{ state_attr('{simulation}', 'learned_percentage_points_per_hour') or 'Not yet learned' }}}} %/hr**  \\n"
+            "content": "### Charging-rate learning\n"
+            f"Charger rating: **{{{{ state_attr('{simulation}', 'charger_rated_kw') }}}} kW**  \n"
+            f"Rate source: **{{{{ state_attr('{simulation}', 'charge_rate_source') }}}}**  \n"
+            f"Learned rate: **{{{{ state_attr('{simulation}', 'learned_percentage_points_per_hour') or 'Not yet learned' }}}} %/hr**  \n"
             f"Samples: **{{{{ state_attr('{simulation}', 'learning_sample_count') or 0 }}}}",
         },
     ])
