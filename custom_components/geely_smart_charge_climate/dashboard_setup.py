@@ -130,6 +130,27 @@ def _optional_vehicle_sensors(hass, entry) -> dict[str, str]:
     return result
 
 
+def _optional_wall_connector_sensors(hass) -> dict[str, str]:
+    """Show connected Tesla wall connector measurements only if present.
+
+    Optional: this integration does not require any smart wallbox.
+    """
+    registry = er.async_get(hass)
+    candidates = {
+        "power": "sensor.tesla_wall_connector_total_power",
+        "connected": "binary_sensor.tesla_wall_connector_vehicle_connected",
+        "session_energy": "sensor.tesla_wall_connector_session_energy",
+        "energy": "sensor.tesla_wall_connector_energy",
+        "status": "sensor.tesla_wall_connector_status",
+    }
+    out = {}
+    for field, entity_id in candidates.items():
+        ent = registry.async_get(entity_id)
+        if ent is not None and ent.disabled_by is None:
+            out[field] = entity_id
+    return out
+
+
 async def async_ensure_dashboard(hass, entry) -> None:
     """Create one non-destructive dashboard in the sidebar.
 
@@ -166,6 +187,7 @@ async def async_ensure_dashboard(hass, entry) -> None:
         plug=discover_plug_entity(hass, entry.data[CONF_BATTERY_ENTITY]),
         charging_power=entry.data.get(CONF_CHARGING_POWER),
         extra_sensors=_optional_vehicle_sensors(hass, entry),
+        charger_sensors=_optional_wall_connector_sensors(hass),
     )
     # Dashboard metadata registration persists across Home Assistant restarts.
     item = await collection.async_create_item(
