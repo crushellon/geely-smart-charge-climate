@@ -49,7 +49,7 @@ class ComfortPreferenceNumber(NumberEntity):
         self._attr_name = f"{profile.title()} {field.replace('_', ' ')}"
         self._attr_native_min_value = FIELDS[field]["min"]
         self._attr_native_max_value = FIELDS[field]["max"]
-        self._attr_native_step = 1
+        self._attr_native_step = 0.5 if field == "temperature" else 1
         if "unit" in FIELDS[field]:
             self._attr_native_unit_of_measurement = FIELDS[field]["unit"]
 
