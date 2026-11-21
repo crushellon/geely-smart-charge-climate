@@ -55,7 +55,7 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         clock["now"] = datetime(2026, 11, 21, 23, 50,
                                  tzinfo=ZoneInfo("Australia/Brisbane"))
-        self.entry = SimpleNamespace(options={})
+        self.entry = SimpleNamespace(options={"scheduled_climate_enabled": True})
         self.climate = FakeCabin()
         self.messages = []
         self.manual = SimpleNamespace(
