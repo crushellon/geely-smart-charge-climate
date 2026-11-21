@@ -120,27 +120,34 @@ class DashboardTests(unittest.TestCase):
             self.ids, "sensor.example_battery",
             extra_sensors={
                 "electric_range": "sensor.example_electric_range",
+                "range_at_full_charge": "sensor.example_full_range",
                 "efficiency": "sensor.example_efficiency",
                 "interior_temperature": "sensor.example_interior_temperature",
                 "tire_front_left": "sensor.example_tire_front_left",
+                "tire_temperature_fl": "sensor.example_tire_temperature_fl",
                 "12v_battery": "sensor.example_12v_battery",
             },
         )
         cards = sum(
             (section["cards"] for section in rich["views"][3]["sections"]), []
         )
-        titles = [card.get("title") for card in cards]
-        for title in ("Range & efficiency", "Climate & temperatures",
-                      "Tyre monitoring", "Vehicle health"):
-            self.assertIn(title, titles)
-        self.assertNotIn("Average speed", str(cards))
+        headings = [card.get("heading") for card in cards]
+        for title in ("Range & driving", "Energy efficiency",
+                      "Climate & temperatures", "Tyre pressures",
+                      "Tyre temperatures", "Vehicle health",
+                      "Energy & battery history"):
+            self.assertIn(title, headings)
+        gauges = [card for card in cards if card.get("type") == "grid"
+                  and any(item.get("type") == "gauge" for item in card["cards"])]
+        self.assertEqual(len(gauges[0]["cards"]), 2)
+        self.assertNotIn("average_speed", str(cards))
 
     def test_optional_sensors_can_be_absent(self):
         result = module.dashboard_config(self.ids, "sensor.example_battery")
         self.assertEqual(len(result["views"]), 4)
 
     def test_uses_only_native_cards(self):
-        native = {"markdown", "gauge", "entities", "entity", "history-graph"}
+        native = {"markdown", "gauge", "entities", "entity", "history-graph", "heading", "grid", "tile"}
         for view in self.config["views"]:
             for section in view["sections"]:
                 for card in section["cards"]:
