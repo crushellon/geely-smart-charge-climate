@@ -96,7 +96,9 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(cards[0]["title"], "Seven-day charging schedule")
         rows = cards[0]["entities"]
         self.assertEqual(len(rows), 7 * 6)
-        self.assertEqual(rows[0]["label"], "Sunday night → Monday")
+        self.assertEqual(rows[0]["label"], "Monday — ready-by deadline")
+        self.assertEqual(rows[3]["name"], "Ready by (any time)")
+        self.assertNotIn("night →", str(rows))
         self.assertEqual(rows[1]["entity"], "switch.monday_enabled")
         self.assertEqual(rows[4]["entity"], "switch.monday_linked_comfort_enabled")
         self.assertEqual(rows[5]["entity"], "select.monday_linked_comfort_profile")
