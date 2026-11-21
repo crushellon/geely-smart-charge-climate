@@ -1,7 +1,7 @@
 {
   "domain": "geely_smart_charge_climate",
   "name": "Geely Smart Charge & Climate",
-  "version": "0.1.0-dev",
+  "version": "0.1.0",
   "documentation": "https://github.com/crushellon/geely-smart-charge-climate",
   "issue_tracker": "https://github.com/crushellon/geely-smart-charge-climate/issues",
   "codeowners": [],
