@@ -24,7 +24,7 @@ def role_and_stem(entity_id: str) -> tuple[str, str] | None:
     """Recognise common Geely entity names, excluding ambiguous variants."""
     for role, pattern in PATTERNS:
         match = pattern.fullmatch(entity_id)
-        if match:
+        if match and "geely" in match.group(1).lower():
             return role, match.group(1)
     return None
 
