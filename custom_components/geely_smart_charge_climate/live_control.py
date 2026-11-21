@@ -141,9 +141,9 @@ class LiveChargeController:
     async def async_set_automatic_enabled(self, enabled):
         """Automatic charging is persistent user intent, not a test mode."""
         self._save_options(automatic_charging_enabled=bool(enabled))
-        await self.async_reconcile_automatic()
+        await self.async_reconcile_automatic(deliberate=bool(enabled))
 
-    async def async_reconcile_automatic(self):
+    async def async_reconcile_automatic(self, deliberate=False):
         """After manual, emergency, public or restart restore user's intent."""
         wanted = self.entry.options.get("automatic_charging_enabled", False) is True
         blocked = (self.owned or self.armed or self.stop_requested_at is not None
