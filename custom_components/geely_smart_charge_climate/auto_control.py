@@ -64,7 +64,7 @@ class AutomaticChargeController:
         # outcome, target and departure date to prevent accidental restart loops.
         self.finished_deadlines = {
             tuple(key.split("|", 1)): value
-            for key, value in entry.options.get("finished_charge_sessions", {}).items()
+            for key, value in self.entry.options.get("finished_charge_sessions", {}).items()
             if isinstance(key, str) and "|" in key and isinstance(value, dict)
         }
         self._recovery_started_at = None
