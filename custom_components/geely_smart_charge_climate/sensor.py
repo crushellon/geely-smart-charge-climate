@@ -70,7 +70,7 @@ class GeelyObservationSensor(SensorEntity):
         if self._power:
             entities.append(self._power)
 
-        async def state_changed(event) -> None:
+        def state_changed(event) -> None:
             self.async_write_ha_state()
 
         self.async_on_remove(
