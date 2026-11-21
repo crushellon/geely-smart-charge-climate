@@ -68,28 +68,23 @@ def independent_climate_schedule_cards(entity_ids: dict[str, str]) -> list[dict]
         {
             "type": "markdown",
             "content": "## Independent cabin comfort\n"
-            "Seven independent, once-per-week schedule slots. They do not "
-            "depend on charging or being plugged in. Multiple slots may "
-            "share the same weekday. All slots start disabled.\n\n"
-            "**Live scheduling:** turn Scheduled climate enabled ON first. "
-            "Enabled slots then command Geely cabin comfort at "
-            "their calculated start and turn it off after the configured hold. "
-            "A manual climate command takes priority.",
+            "Seven independent weekly appointments, with their own day, "
+            "ready-by time, cabin temperature, seat settings and lead/hold "
+            "times. These do not require charging or a cable. "
+            "Manual climate takes priority.",
         },
         {
-            "type": "entity",
-            "entity": entity_ids["scheduled_climate_enabled"],
-            "name": "Scheduled climate enabled",
-        },
-        {
-            "type": "entity",
-            "entity": entity_ids["climate_next"],
-            "name": "Next independent climate appointment",
-        },
-        {
-            "type": "entity",
-            "entity": entity_ids["scheduled_climate_status"],
-            "name": "Live climate scheduler",
+            "type": "entities",
+            "title": "Current climate status",
+            "show_header_toggle": False,
+            "entities": [
+                {"entity": entity_ids["scheduled_climate_enabled"],
+                 "name": "Scheduled climate enabled"},
+                {"entity": entity_ids["scheduled_climate_status"],
+                 "name": "Climate session"},
+                {"entity": entity_ids["climate_next"],
+                 "name": "Next independent appointment"},
+            ],
         },
     ]
     for slot in range(1, 8):
@@ -151,11 +146,12 @@ def dashboard_config(
     """Construct a native, mobile-friendly four-view Lovelace dashboard.
 
     The configured Geely charging switch is NEVER rendered as a toggle.
-    All writable dashboard entities edit this integration's hypothetical
-    schedule; they cannot call the vehicle's control APIs.
+    Dashboard controls are real user features; they call guarded Geely
+    actions. Diagnostic/test functions are not part of this dashboard.
     """
     status = entity_ids["observer_status"]
     simulation = entity_ids["simulation_decision"]
+    vehicle_status = entity_ids["vehicle_charging_status"]
 
     # Show independent telemetry sources honestly. Wallbox power may be
     # available when the Geely cloud reports 0 or has not updated yet.
@@ -197,8 +193,10 @@ def dashboard_config(
               f"{{% elif gp > 0.25 %}}{{{{ gp | round(2) }}}} kW (Geely)"
               f"{{% elif is_state('{switch_id}', 'on') %}}Requested — power not confirmed"
               f"{{% else %}}Off{{% endif %}}  \n"
-              f"**Automatic charging:** {{% if enabled %}}Enabled{{% else %}}Disabled{{% endif %}}"
-              f" · **Session:** {{{{ states('{entity_ids['automatic_charge_decision']}') }}}}  \n"
+              f"**Mode:** {{{{ states('{vehicle_status}') | replace('_', ' ') | title }}}}" 
+              f" ({{{{ state_attr('{vehicle_status}', 'attribution') or 'none' }}}})" 
+              f" · **Automatic:** {{% if enabled %}}Enabled{{% else %}}Disabled{{% endif %}}"
+              f"  \n"
               f"**Next charge:** {{{{ state_attr('{simulation}', 'estimated_start') or 'Not calculated' }}}}  \n"
               f"**Ready by:** {{{{ state_attr('{simulation}', 'ready_by') or 'Not scheduled' }}}}"
               f" · **Target:** {{{{ state_attr('{simulation}', 'target_percent') or '—' }}}}%"
@@ -209,7 +207,7 @@ def dashboard_config(
          "name": "Automatic charging enabled"},
         {"entity": entity_ids["public_charging_mode"],
          "name": "Public charging mode"},
-        {"entity": entity_ids["automatic_charge_decision"],
+        {"entity": entity_ids["vehicle_charging_status"],
          "name": "Charging session"},
     ]
     if plug:
@@ -230,7 +228,7 @@ def dashboard_config(
             ),
             action_button(
                 "emergency_release", "Release emergency stop", "mdi:lock-open",
-                "Release the emergency lockout? Automatic charging will not be enabled by this action.",
+                "Release the emergency lockout? A previously enabled schedule can resume when safe.",
             ),
         ],
     }
@@ -240,7 +238,6 @@ def dashboard_config(
         "show_header_toggle": False,
         "entities": [
             {"entity": manual_target_id, "name": "Target percentage"},
-            {"entity": entity_ids["manual_charge_status"], "name": "Manual charge status"},
         ],
     }
     manual_preview = {
@@ -268,9 +265,9 @@ def dashboard_config(
     manual_buttons = {
         "type": "grid", "columns": 2, "square": False, "cards": [
             action_button("manual_charge_start", "Start chosen target", "mdi:play",
-                          "Start a manual Geely charge? Automatic schedule will pause until Resume schedule."),
+                          "Start a manual Geely charge? If automatic scheduling is enabled, it resumes when manual charging finishes."),
             action_button("manual_charge_stop", "Stop manual", "mdi:stop",
-                          "Stop the integration-owned manual charge?"),
+                          "Stop manual/observed charging at home?"),
             action_button("manual_charge_quick80", "Quick 80%", "mdi:battery-80"),
             action_button("manual_charge_quick100", "Quick 100%", "mdi:battery-charging-100"),
             action_button("manual_charge_resume", "Resume schedule", "mdi:calendar-check"),
@@ -278,7 +275,6 @@ def dashboard_config(
     }
     climate_rows = [
         {"entity": entity_ids["manual_cabin_temperature"], "name": "Custom cabin temperature"},
-        {"entity": entity_ids["manual_climate_status"], "name": "Manual climate status"},
     ]
     if climate_entity:
         climate_rows.insert(0, {"entity": climate_entity, "name": "Cabin climate"})
@@ -295,24 +291,9 @@ def dashboard_config(
             action_button("manual_climate_off", "Climate + seats OFF", "mdi:power"),
         ],
     }
-    power_details = (
-        f"**Geely switch:** {{{{ states('{switch_id}') }}}}"
-        f" · **Geely power:** {{{{ states('{geely_power_id}') }}}} kW  \n"
-        + (f"**Optional charger power:** {{{{ states('{wall_power_id}') }}}} kW  \n"
-           if "power" in charger_sensors else "")
-        + f"**Stop verification:** {{{{ state_attr('{entity_ids['automatic_charge_decision']}', 'stop_verification') or 'Idle' }}}}  \n"
-        + "*Power readings can be delayed. A charging request is not proof that energy is flowing.*"
-    )
     charging_cards = [
         summary, safety, safety_buttons, manual_charge, manual_preview,
         manual_buttons, manual_climate, manual_climate_buttons,
-        {"type": "markdown", "content": "### Charging telemetry\n" + power_details},
-        {"type": "markdown", "content":
-         "**Controller:** Automatic charging preference and active sessions "
-         "are restored after Home Assistant restarts, subject to Geely "
-         "telemetry and safety interlocks. Public charging mode must be ON "
-         "for public sessions. Independent climate schedules operate "
-         "without a charging cable."},
     ]
 
     stats_cards = [
@@ -572,8 +553,8 @@ def dashboard_config(
                 "type": "sections",
                 "max_columns": 2,
                 "sections": [
-                    _section(all_climate[:4] + all_climate[4::2]),
-                    _section(all_climate[5::2]),
+                    _section(all_climate[:2] + all_climate[2::2]),
+                    _section(all_climate[3::2]),
                 ],
             },
             {
