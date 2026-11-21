@@ -6,6 +6,7 @@ from .comfort import PROFILES, FIELDS, get_value, set_value
 from .weekly_schedule import DAY_NAMES
 from .climate_schedule import SLOTS
 from .climate_schedule_entities import ClimateScheduleSetting
+from .charge_climate import get_timing, set_timing
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -16,6 +17,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
            for profile in PROFILES for field in FIELDS]
         + [ClimateSlotNumber(hass, entry, slot, field)
            for slot in SLOTS for field in ('temperature', 'lead_minutes', 'hold_minutes')]
+        + [LinkedComfortTimingNumber(hass, entry, field)
+           for field in ('lead_minutes', 'hold_minutes')]
     )
 
 
@@ -96,3 +99,32 @@ class ClimateSlotNumber(ClimateScheduleSetting, NumberEntity):
 
     async def async_set_native_value(self, value):
         await self.save(value)
+
+
+class LinkedComfortTimingNumber(NumberEntity):
+    """Edit shared lead/hold timing for charging-linked comfort only."""
+
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 0
+    _attr_native_max_value = 120
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = "min"
+    _attr_icon = "mdi:clock-outline"
+
+    def __init__(self, hass, entry, field):
+        self.hass = hass
+        self.entry = entry
+        self.field = field
+        self._attr_unique_id = f"{entry.entry_id}_linked_comfort_{field}"
+        self._attr_name = f"Charging linked comfort {field.replace('_', ' ')}"
+
+    @property
+    def native_value(self):
+        return get_timing(self.entry.options, self.field)
+
+    async def async_set_native_value(self, value):
+        self.hass.config_entries.async_update_entry(
+            self.entry, options=set_timing(self.entry.options, self.field, value)
+        )
+        self.async_write_ha_state()
