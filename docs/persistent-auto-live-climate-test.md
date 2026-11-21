@@ -30,7 +30,10 @@ Optional wallbox telemetry is **display-only**.
    Restart Home Assistant.
 5. Open **Geely EV Control Centre**, check the original four tabs and
    **Live climate scheduler** status on Climate Scheduler.
-6. **Automatic charging enabled defaults OFF only if no previous persistent
+6. **Scheduled climate enabled** initially defaults OFF (including migrated
+   simulation slots). Turn it ON when ready to test live climate. Automatic
+   charging can be enabled separately.
+7. **Automatic charging enabled defaults OFF only if no previous persistent
    preference exists** (as on an upgrade from v0.3.10). Turn it ON once if
    you want automatic scheduling. The setting is thereafter remembered.
 7. Check Emergency Stop is released and Public Charging Mode OFF *only for
