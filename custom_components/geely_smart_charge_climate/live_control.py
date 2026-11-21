@@ -151,7 +151,7 @@ class LiveChargeController:
                    or self.entry.options.get("emergency_stop", False) is True)
         target_mode = "Active" if wanted and not blocked else "Off"
         if self.auto.mode != target_mode:
-            await self.auto.async_set_mode(target_mode)
+            await self.auto.async_set_mode(target_mode, deliberate=deliberate)
         elif target_mode == "Active":
             await self.auto.async_tick()
         self._notify()
