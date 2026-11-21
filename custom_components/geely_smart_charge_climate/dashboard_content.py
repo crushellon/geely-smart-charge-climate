@@ -70,6 +70,47 @@ def comfort_cards(entity_ids: dict[str, str]) -> list[dict]:
     return result
 
 
+def independent_climate_schedule_cards(entity_ids: dict[str, str]) -> list[dict]:
+    """Seven separately editable, weekly climate-only schedule cards."""
+    cards = [
+        {
+            "type": "markdown",
+            "content": "## Independent cabin comfort\\n"
+            "Seven independent, once-per-week schedule slots. They do not "
+            "depend on charging or being plugged in. Multiple slots may "
+            "share the same weekday. All slots start disabled.\\n\\n"
+            "**Simulation only:** no vehicle climate commands are sent.",
+        },
+        {
+            "type": "entity",
+            "entity": entity_ids["climate_next"],
+            "name": "Next climate schedule (simulation)",
+        },
+    ]
+    for slot in range(1, 8):
+        pre = f"climate_slot_{slot}_"
+        cards.append({
+            "type": "entities",
+            "title": f"Climate schedule {slot}",
+            "show_header_toggle": False,
+            "entities": [
+                {"entity": entity_ids[pre + "enabled"], "name": "Schedule enabled"},
+                {"entity": entity_ids[pre + "day"], "name": "Day of week"},
+                {"entity": entity_ids[pre + "ready_time"], "name": "Cabin ready by"},
+                {"type": "section", "label": "Cabin & comfort"},
+                {"entity": entity_ids[pre + "temperature"], "name": "Cabin temperature"},
+                {"entity": entity_ids[pre + "driver_seat"], "name": "Driver seat"},
+                {"entity": entity_ids[pre + "passenger_seat"], "name": "Passenger seat"},
+                {"entity": entity_ids[pre + "steering_heat"], "name": "Steering wheel heating"},
+                {"type": "section", "label": "Timing"},
+                {"entity": entity_ids[pre + "lead_minutes"], "name": "Start before ready"},
+                {"entity": entity_ids[pre + "hold_minutes"], "name": "Keep running after ready"},
+            ],
+        })
+    return cards
+
+
+
 def dashboard_config(
     entity_ids: dict[str, str],
     battery: str,
@@ -181,7 +222,7 @@ def dashboard_config(
                 "path": "climate",
                 "icon": "mdi:car-defrost-front",
                 "type": "masonry",
-                "cards": comfort_cards(entity_ids),
+                "cards": comfort_cards(entity_ids) + independent_climate_schedule_cards(entity_ids),
             },
             {
                 "title": "Schedule",
