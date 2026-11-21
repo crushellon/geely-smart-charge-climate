@@ -136,6 +136,91 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.auto.status, "STOPPED")
         self.assertFalse(self.auto.owned)
 
+    async def test_editing_live_100_target_to_current_soc_stops_and_updates_decision(self):
+        # Regression: user's active 100% charge continued after changing
+        # Saturday's slider to the currently reported 78%.
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on"])
+        self.assertEqual(self.auto.owned_target, 100)
+        self.values["sensor.battery"] = "78"
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 78
+        await self.auto.async_tick()  # Immediate schedule-change listener
+        self.assertEqual(self.auto.decision.target, 78)
+        self.assertEqual(self.auto.owned_target, 78)
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+
+    async def test_editing_live_target_above_soc_refreshes_display_then_stops(self):
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        await self.auto.async_set_mode("Active")
+        self.values["sensor.battery"] = "78"
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 79
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.decision.target, 79)
+        self.assertEqual(self.auto.owned_target, 79)
+        self.assertEqual(self.auto.status, "CHARGING")
+        self.assertIn("79%", self.auto.message)
+        self.assertEqual(self.services.calls, ["turn_on"])
+        self.values["sensor.battery"] = "79"
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+
+    async def test_editing_live_ready_by_time_updates_decision(self):
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        await self.auto.async_set_mode("Active")
+        self.entry.options["weekly_schedule"]["monday"]["ready_time"] = "08:00"
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.decision.ready_by.hour, 8)
+        self.assertEqual(self.auto.owned_deadline.hour, 8)
+        self.assertEqual(self.services.calls, ["turn_on"])
+
+    async def test_disabling_live_schedule_stops_its_charge(self):
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        await self.auto.async_set_mode("Active")
+        self.entry.options["weekly_schedule"]["monday"]["enabled"] = False
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+
+    async def test_changing_target_after_stop_request_does_not_cancel_stop(self):
+        await self.auto.async_set_mode("Active")
+        self.values["sensor.battery"] = "80"
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+
+    async def test_monitor_target_change_notifies_even_when_status_unchanged(self):
+        notifications = []
+        self.manual._notify = lambda: notifications.append(True)
+        await self.auto.async_set_mode("Monitor")
+        initial_count = len(notifications)
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 85
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "MONITORING")
+        self.assertEqual(self.auto.decision.target, 85)
+        self.assertGreater(len(notifications), initial_count)
+        self.assertEqual(self.services.calls, [])
+
+    async def test_completed_session_is_not_restarted_after_ready_time_edit(self):
+        await self.auto.async_set_mode("Active")
+        self.values["sensor.battery"] = "80"
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+        self.entry.options["weekly_schedule"]["monday"]["ready_time"] = "08:00"
+        self.values["sensor.battery"] = "70"  # Simulate stale battery rollback
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+
     async def test_100_is_vehicle_managed(self):
         self.entry.options["weekly_schedule"]["monday"]["target"] = 100
         await self.auto.async_set_mode("Active")
