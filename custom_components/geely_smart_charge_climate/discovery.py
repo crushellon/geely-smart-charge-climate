@@ -97,3 +97,32 @@ def validate_sources(hass: HomeAssistant, values: dict) -> str | None:
         if not 0 <= percent <= 100:
             return "invalid_battery"
     return None
+
+
+def discover_plug_entity(hass: HomeAssistant, battery_entity: str) -> str | None:
+    """Find one real plug sensor on the same Geely device/config entry.
+
+    Uses the battery entity's vehicle-specific stem as an exact match. Existing
+    entries need no migration or reconfiguration, and no guessing is allowed.
+    """
+    registry = er.async_get(hass)
+    battery = registry.async_get(battery_entity)
+    if battery is None or battery.disabled_by is not None:
+        return None
+    owner = _geely_entry_id(hass, battery)
+    if owner is None:
+        return None
+    if not battery_entity.startswith("sensor.") or not battery_entity.endswith("_battery"):
+        return None
+    stem = battery_entity[len("sensor."):-len("_battery")]
+    if not stem:
+        return None
+    expected = f"binary_sensor.{stem}_charger_plug"
+    plug = registry.async_get(expected)
+    if plug is None or plug.disabled_by is not None:
+        return None
+    if _geely_entry_id(hass, plug) != owner:
+        return None
+    if battery.device_id and plug.device_id and battery.device_id != plug.device_id:
+        return None
+    return plug.entity_id
