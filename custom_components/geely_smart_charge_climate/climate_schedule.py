@@ -1,8 +1,8 @@
-"""Seven independent weekly climate schedules, for simulation only.
+"""Seven independent weekly Geely climate schedule settings.
 
-Each slot occurs at most once per calendar week. Slots can share the same
-weekday, and have their own temperature, seat and wheel preferences. No state
-here triggers a service or requires a charge cable.
+Slots can share weekdays and have separate temperatures, seats and timing.
+This pure planning module never sends services; the scheduled-climate runtime
+executes active appointments without requiring a charging cable.
 """
 from datetime import datetime, timedelta
 from math import isfinite
@@ -78,7 +78,7 @@ def next_event(now: datetime, options: dict) -> dict | None:
     """Earliest future occurrence, measured by ready-by time.
 
     Return the start and end times even when a lead time crosses midnight.
-    This function is advisory: it never starts a climate session.
+    Read-only upcoming-event helper; actual commands run in scheduled_climate.
     """
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("Need timezone-aware local time")

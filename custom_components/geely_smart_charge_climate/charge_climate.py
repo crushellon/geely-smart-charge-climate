@@ -1,7 +1,7 @@
 """Charging-linked comfort preferences for each ready-by weekday.
 
-These settings share the charging deadline, so there is no second clock.
-They affect dashboard and simulations only. No vehicle commands are sent.
+These settings share the charging deadline. The scheduled-climate controller
+uses them to send Geely cabin commands independently of charging power.
 """
 from .weekly_schedule import DAY_NAMES
 
@@ -55,8 +55,8 @@ def set_timing(options: dict, field: str, value) -> dict:
 def snapshot(options: dict, day: str) -> dict:
     """Read the current charging-linked comfort configuration for diagnostics.
 
-    Configuration only: this does not run climate or send vehicle commands.
-    Both the active session and dashboard read fresh persisted settings.
+    Read-only snapshot of live settings. The scheduled climate runtime uses
+    these preferences, while this helper itself sends no commands.
     """
     from .comfort import get_value as get_profile_value
     from .comfort_display import get_seat_mode
@@ -73,5 +73,5 @@ def snapshot(options: dict, day: str) -> dict:
         "steering_heat": bool(get_profile_value(options, selected, "steering_heat")),
         "lead_minutes": get_timing(options, "lead_minutes"),
         "hold_minutes": get_timing(options, "hold_minutes"),
-        "commands_enabled": False,
+        "commands_enabled": options.get("scheduled_climate_enabled", False) is True,
     }

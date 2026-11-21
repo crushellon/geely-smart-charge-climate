@@ -40,6 +40,7 @@ async def async_setup_entry(
         AutomaticChargeStatusSensor(entry),
         ManualClimateStatusSensor(entry),
         ManualChargingStatusSensor(entry),
+        ScheduledClimateStatusSensor(entry),
     ])
 
 
@@ -177,8 +178,11 @@ class GeelySimulationSensor(GeelyObservedBase):
         plan = next_charge(dt_util.now(), self.entry.options.get("weekly_schedule", {}))
         result = self._result()
         return {
-            "simulation_only": True,
-            "vehicle_commands_sent": False,
+            "simulation_only": False,
+            "vehicle_commands_sent": (
+                self.entry.runtime_data.scheduled_climate.active is not None
+                and self.entry.runtime_data.scheduled_climate.active.get("applied") is True
+            ),
             "schedule_source": "configured weekly schedule (simulation only)",
             "next_schedule_day": plan.day if plan else None,
             "target_percent": plan.target if plan else None,
@@ -243,7 +247,7 @@ class GeelySimulationSensor(GeelyObservedBase):
 
 
 class ClimateNextSessionSensor(SensorEntity):
-    """Show hypothetical next climate session; never control the vehicle."""
+    """Display next independent climate appointment and runtime activity."""
 
     _attr_has_entity_name = True
     _attr_name = "Next climate session"
@@ -263,8 +267,8 @@ class ClimateNextSessionSensor(SensorEntity):
     def extra_state_attributes(self) -> dict:
         session = next_event(dt_util.now(), self.entry.options)
         if not session:
-            return {"simulation_only": True, "vehicle_commands_sent": False,
-                    "reason": "No climate slots enabled"}
+            return {"simulation_only": False, "vehicle_commands_sent": False,
+                    "reason": "No independent climate slots enabled"}
         return {
             "simulation_only": True,
             "vehicle_commands_sent": False,
@@ -386,7 +390,9 @@ class AutomaticChargeStatusSensor(SensorEntity):
             "linked_comfort_steering_heat": comfort["steering_heat"] if comfort else None,
             "linked_comfort_lead_minutes": comfort["lead_minutes"] if comfort else None,
             "linked_comfort_hold_minutes": comfort["hold_minutes"] if comfort else None,
-            "linked_comfort_commands_enabled": False,
+            "linked_comfort_commands_enabled": self.entry.options.get(
+                "scheduled_climate_enabled", False
+            ) is True,
             "stop_attempts": auto.stop_attempts,
             "stop_confirmation_pending": auto.stop_requested_at is not None,
             "stop_verification": (
@@ -404,8 +410,13 @@ class AutomaticChargeStatusSensor(SensorEntity):
             "stop_watch_until": auto.stop_watch_until.isoformat()
                                 if auto.stop_watch_until else None,
             "last_event": auto.last_event,
-            "restarts_disarm_controller": True,
-            "climate_commands_enabled": False,
+            "restarts_disarm_controller": False,
+            "automatic_enabled_preference": self.entry.options.get(
+                "automatic_charging_enabled", False
+            ) is True,
+            "climate_commands_enabled": self.entry.options.get(
+                "scheduled_climate_enabled", False
+            ) is True,
             "enabled_schedule_days": [
                 day for day, values in
                 self.entry.options.get("weekly_schedule", {}).items()
@@ -457,7 +468,9 @@ class ManualClimateStatusSensor(SensorEntity):
         return {
             "message": self.entry.runtime_data.climate.message,
             "manual_only": True,
-            "scheduled_climate_active": False,
+            "scheduled_climate_active": (
+                self.entry.runtime_data.scheduled_climate.active is not None
+            ),
         }
 
     async def async_added_to_hass(self):
@@ -497,3 +510,41 @@ class ManualChargingStatusSensor(SensorEntity):
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
         self.async_on_remove(self.entry.runtime_data.listen(self.async_write_ha_state))
+
+
+class ScheduledClimateStatusSensor(SensorEntity):
+    """Scheduled cabin activity/owner and last command status."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Scheduled climate status"
+    _attr_icon = "mdi:calendar-clock"
+
+    def __init__(self, entry):
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_scheduled_climate_status"
+
+    @property
+    def native_value(self):
+        return self.entry.runtime_data.scheduled_climate.status
+
+    @property
+    def extra_state_attributes(self):
+        controller = self.entry.runtime_data.scheduled_climate
+        return {
+            "message": controller.message,
+            "active_session": controller.active["key"] if controller.active else None,
+            "session_end": controller.active.get("end_at") if controller.active else None,
+            "manual_override": controller.manual_override,
+            "suppressed_occurrence": controller.suppressed_key,
+            "completed_occurrences": len(controller.completed),
+            "vehicle_commands_live": True,
+            "scheduled_climate_enabled": self.entry.options.get(
+                "scheduled_climate_enabled", False
+            ) is True,
+        }
+
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self.entry.runtime_data.listen(self.async_write_ha_state)
+        )

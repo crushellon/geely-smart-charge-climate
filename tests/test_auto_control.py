@@ -109,6 +109,45 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.auto = Auto(self.manual)
 
+    async def test_auto_running_session_persists_and_restores_without_second_start(self):
+        self.manual._save_options = lambda **vals: self.entry.options.update(vals)
+        self.entry.options["automatic_charging_enabled"] = True
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on"])
+        saved = self.entry.options["automatic_session"]
+        self.assertTrue(saved["active"])
+        self.assertEqual(saved["target"], 80)
+        another = Auto(self.manual)
+        await another.async_restore()
+        self.assertTrue(another.owned)
+        self.assertEqual(another.owned_target, 80)
+        await another.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on"])
+        self.assertEqual(another.mode, "Active")
+
+    async def test_completed_session_persists_across_restart_no_duplicate_start(self):
+        self.manual._save_options = lambda **vals: self.entry.options.update(vals)
+        await self.auto.async_set_mode("Active")
+        self.values["sensor.battery"] = "80"
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+        self.assertFalse(self.entry.options["automatic_session"]["active"])
+        self.assertEqual(self.entry.options["finished_charge_sessions"][
+            "monday|2026-11-23"]["outcome"], "completed")
+        another = Auto(self.manual)
+        self.values["sensor.battery"] = "79"  # Stale cloud rollback
+        await another.async_set_mode("Active", deliberate=False)
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertEqual(another.status, "COMPLETED")
+
+    async def test_new_automatic_session_clears_previous_manual_stop_watch(self):
+        self.manual.stop_watch_until = datetime.now(timezone.utc) + timedelta(minutes=5)
+        await self.auto.async_set_mode("Active")
+        self.assertIsNone(self.manual.stop_watch_until)
+        self.assertEqual(self.services.calls, ["turn_on"])
+
     async def test_immediate_off_does_not_verify_before_settling(self):
         # Reproduces START -> Off within moments, when cloud feedback is not
         # trustworthy enough to declare a verified physical stop.

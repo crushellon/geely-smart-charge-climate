@@ -55,8 +55,9 @@ def comfort_cards(entity_ids: dict[str, str]) -> list[dict]:
     result.append({
         "type": "markdown",
         "content": "Comfort preferences are saved here. Manual Cool/Warm buttons "
-        "on EV Control can send Geely commands. Scheduled climate and "
-        "charging-linked preconditioning are still being developed.",
+        "on EV Control send Geely commands. Charging-linked and independent "
+        "climate schedules now run automatically when enabled. Manual "
+        "climate commands take priority over the current scheduled session.",
     })
     return result
 
@@ -70,12 +71,25 @@ def independent_climate_schedule_cards(entity_ids: dict[str, str]) -> list[dict]
             "Seven independent, once-per-week schedule slots. They do not "
             "depend on charging or being plugged in. Multiple slots may "
             "share the same weekday. All slots start disabled.\n\n"
-            "**Simulation only:** no vehicle climate commands are sent.",
+            "**Live scheduling:** turn Scheduled climate enabled ON first. "
+            "Enabled slots then command Geely cabin comfort at "
+            "their calculated start and turn it off after the configured hold. "
+            "A manual climate command takes priority.",
+        },
+        {
+            "type": "entity",
+            "entity": entity_ids["scheduled_climate_enabled"],
+            "name": "Scheduled climate enabled",
         },
         {
             "type": "entity",
             "entity": entity_ids["climate_next"],
-            "name": "Next climate schedule (simulation)",
+            "name": "Next independent climate appointment",
+        },
+        {
+            "type": "entity",
+            "entity": entity_ids["scheduled_climate_status"],
+            "name": "Live climate scheduler",
         },
     ]
     for slot in range(1, 8):
@@ -294,10 +308,11 @@ def dashboard_config(
         manual_buttons, manual_climate, manual_climate_buttons,
         {"type": "markdown", "content": "### Charging telemetry\n" + power_details},
         {"type": "markdown", "content":
-         "**Testing limitation:** Automatic charging currently requires re-enabling "
-         "after a Home Assistant restart; unattended restart recovery is not "
-         "yet complete. Public charging mode must be ON for public sessions. "
-         "Linked and independent climate schedules do not yet send commands."},
+         "**Controller:** Automatic charging preference and active sessions "
+         "are restored after Home Assistant restarts, subject to Geely "
+         "telemetry and safety interlocks. Public charging mode must be ON "
+         "for public sessions. Independent climate schedules operate "
+         "without a charging cable."},
     ]
 
     stats_cards = [
@@ -347,7 +362,7 @@ def dashboard_config(
     info = {"type": "markdown", "content":
         "**Charging-linked comfort** uses the same ready-by time as charging. "
         "Choose Cool/Warm on the charging schedule; its settings are on "
-        "Comfort Settings. **Scheduled climate commands are not enabled yet.**"}
+        "Comfort Settings. **Climate preconditioning is active when enabled.**"}
     extra_sensors = extra_sensors or {}
     charger_sensors = charger_sensors or {}
 
@@ -557,8 +572,8 @@ def dashboard_config(
                 "type": "sections",
                 "max_columns": 2,
                 "sections": [
-                    _section(all_climate[:2] + all_climate[2::2]),
-                    _section(all_climate[3::2]),
+                    _section(all_climate[:4] + all_climate[4::2]),
+                    _section(all_climate[5::2]),
                 ],
             },
             {

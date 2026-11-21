@@ -121,6 +121,40 @@ class ManualClimateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len([c for c in self.services.calls
                               if c[:2] == ("select", "select_option")]), 4)
 
+    async def test_scheduled_warm_then_off_never_touches_charging_switch(self):
+        desired = {
+            "temperature": 24.5, "driver_seat": "Heat Medium",
+            "passenger_seat": "Vent Low", "steering_heat": True,
+        }
+        self.assertTrue(await self.control.apply_scheduled(desired))
+        self.assertIn(("climate", "set_temperature", {
+            "entity_id": self.vehicle["climate"],
+            "temperature": 24.5, "hvac_mode": "heat_cool",
+        }), self.services.calls)
+        self.assertIn(("select", "select_option", {
+            "entity_id": self.vehicle["driver_heat"], "option": "Medium",
+        }), self.services.calls)
+        self.assertIn(("select", "select_option", {
+            "entity_id": self.vehicle["passenger_vent"], "option": "Low",
+        }), self.services.calls)
+        self.assertTrue(await self.control.stop_scheduled())
+        self.assertIn(("climate", "turn_off", {
+            "entity_id": self.vehicle["climate"],
+        }), self.services.calls)
+        self.assertTrue(all(
+            call[2]["entity_id"] != "switch.my_geely_ex5_4034_charging"
+            for call in self.services.calls
+        ))
+
+    async def test_scheduled_climate_unavailable_sends_no_cloud_commands(self):
+        self.hass.states.get = lambda ent: None
+        ok = await self.control.apply_scheduled({
+            "temperature": 21, "driver_seat": "Off",
+            "passenger_seat": "Off", "steering_heat": False,
+        })
+        self.assertFalse(ok)
+        self.assertEqual(self.services.calls, [])
+
     async def test_climate_unavailable_never_issues_commands(self):
         self.hass.states.get = lambda ent: None
         await self.control.apply("Cool")

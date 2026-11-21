@@ -36,14 +36,16 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
         "observer_status": ("sensor", f"{entry.entry_id}_observer_status"),
         "simulation_decision": ("sensor", f"{entry.entry_id}_simulation_decision"),
         "climate_next": ("sensor", f"{entry.entry_id}_climate_next"),
+        "scheduled_climate_status": (
+            "sensor", f"{entry.entry_id}_scheduled_climate_status"
+        ),
+        "scheduled_climate_enabled": (
+            "switch", f"{entry.entry_id}_scheduled_climate_enabled"
+        ),
         "live_test_status": ("sensor", f"{entry.entry_id}_live_test_status"),
         "automatic_charge_decision": ("sensor", f"{entry.entry_id}_automatic_charge_decision"),
-        "automatic_charge_mode": ("select", f"{entry.entry_id}_automatic_charge_mode"),
         "public_charging_mode": ("switch", f"{entry.entry_id}_public_charging_mode"),
-        "live_test_armed": ("switch", f"{entry.entry_id}_live_test_armed"),
         "live_test_target": ("number", f"{entry.entry_id}_live_test_target"),
-        "live_test_start": ("button", f"{entry.entry_id}_live_test_start"),
-        "live_test_stop": ("button", f"{entry.entry_id}_live_test_stop"),
         "automatic_charging_enabled": ("switch", f"{entry.entry_id}_automatic_charging_enabled"),
         "emergency_stop": ("switch", f"{entry.entry_id}_emergency_stop"),
         "manual_charge_target": ("number", f"{entry.entry_id}_live_test_target"),

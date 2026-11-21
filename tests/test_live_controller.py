@@ -32,7 +32,7 @@ class DummyAutomatic:
         self.unexpected_since = None
         self._lock = asyncio.Lock()
 
-    async def async_set_mode(self, mode):
+    async def async_set_mode(self, mode, deliberate=True):
         self.mode = mode
 
     async def _request_stop(self, message):
@@ -45,6 +45,22 @@ class DummyAutomatic:
         return None
 
     async def async_shutdown(self):
+        return None
+
+    async def async_restore(self):
+        return None
+
+
+class DummyScheduledClimate:
+    def __init__(self, manual):
+        self.status = "IDLE"
+        self.message = "No schedule"
+        self.active = None
+
+    async def async_tick(self):
+        return None
+
+    async def async_manual_override(self, action):
         return None
 
 
@@ -60,6 +76,7 @@ class DummyClimate:
 env = {
     "AutomaticChargeController": DummyAutomatic,
     "ManualClimateController": DummyClimate,
+    "ScheduledClimateController": DummyScheduledClimate,
     "MANUAL_STOP_SETTLE": timedelta(0),
     "MANUAL_STOP_WATCH": timedelta(minutes=5),
     "datetime": datetime,
@@ -126,8 +143,9 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         states = FakeStates()
         services = FakeServices(states)
-        hass = SimpleNamespace(states=states, services=services,
-                               config_entries=SimpleNamespace(async_update_entry=
+        hass = SimpleNamespace(
+            states=states, services=services, async_create_task=asyncio.create_task,
+            config_entries=SimpleNamespace(async_update_entry=
                                    lambda entry, options: setattr(entry, "options", options)))
         entry = SimpleNamespace(data={
             "battery_entity": "sensor.battery",
@@ -282,6 +300,62 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.controller.async_release_emergency_stop()
         self.assertFalse(self.controller.entry.options["emergency_stop"])
         self.assertEqual(self.controller.auto.mode, "Off")
+
+    async def test_automatic_preference_persists_across_restart(self):
+        await self.controller.async_set_automatic_enabled(True)
+        self.assertTrue(self.controller.entry.options["automatic_charging_enabled"])
+        self.assertEqual(self.controller.auto.mode, "Active")
+        replacement = LiveChargeController(self.controller.hass, self.controller.entry)
+        await replacement.async_restore()
+        self.assertEqual(replacement.auto.mode, "Active")
+        self.assertEqual(self.services.calls, [])
+
+    async def test_manual_stop_restores_previously_enabled_schedule(self):
+        await self.controller.async_set_automatic_enabled(True)
+        await self.controller.async_start_manual(80)
+        self.assertTrue(self.controller.entry.options["automatic_charging_enabled"])
+        self.assertEqual(self.controller.auto.mode, "Off")
+        await self.controller.async_stop()
+        await self.controller.async_tick()
+        await self.controller.async_tick()
+        await asyncio.sleep(0)
+        self.assertEqual(self.controller.status, "STOPPED")
+        self.assertEqual(self.controller.auto.mode, "Active")
+        self.assertFalse(self.controller.entry.options["manual_session"]["active"])
+
+    async def test_manually_disabled_preference_stays_off_after_manual_stop(self):
+        await self.controller.async_set_automatic_enabled(False)
+        await self.controller.async_start_manual(80)
+        await self.controller.async_stop()
+        await self.controller.async_tick()
+        await self.controller.async_tick()
+        await asyncio.sleep(0)
+        self.assertEqual(self.controller.auto.mode, "Off")
+
+    async def test_emergency_release_restores_saved_auto_intent(self):
+        await self.controller.async_set_automatic_enabled(True)
+        await self.controller.async_emergency_stop()
+        self.assertEqual(self.controller.auto.mode, "Off")
+        self.assertTrue(self.controller.entry.options["emergency_stop"])
+        await self.controller.async_release_emergency_stop()
+        self.assertEqual(self.controller.auto.mode, "Active")
+        self.assertTrue(self.controller.entry.options["automatic_charging_enabled"])
+
+    async def test_restart_adopts_manual_charge_without_duplicate_start(self):
+        self.controller.entry.options["manual_session"] = {
+            "active": True, "target": 100,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.states.data["switch.car"].state = "on"
+        self.states.data["sensor.power"].state = "6.5"
+        new = LiveChargeController(self.controller.hass, self.controller.entry)
+        await new.async_restore()
+        self.assertTrue(new.owned)
+        self.assertEqual(new.active_target, 100)
+        self.assertEqual(self.services.calls, [])
+        await new.async_tick()
+        self.assertEqual(self.services.calls, [])
+        self.assertTrue(new.observed_active)
 
     async def test_native_public_mode_blocks_manual_start(self):
         self.controller.entry.options["public_charging_mode"] = True

@@ -21,7 +21,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     ] + [ClimateSlotSelect(hass, entry, slot, field)
          for slot in SLOTS for field in ('day', 'driver_seat', 'passenger_seat')]
         + [ChargingLinkedComfortSelect(hass, entry, day) for day in DAYS_OF_WEEK]
-        + [AutomaticChargeModeSelect(entry)])
+        )
 
 
 class ComfortSeatSelect(SelectEntity):

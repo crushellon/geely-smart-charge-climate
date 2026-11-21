@@ -62,7 +62,12 @@ class AutomaticChargeController:
         self.last_event = "No automatic charging action"
         # A finished session is not necessarily a completed target. Keep its
         # outcome, target and departure date to prevent accidental restart loops.
-        self.finished_deadlines = {}
+        self.finished_deadlines = {
+            tuple(key.split("|", 1)): value
+            for key, value in self.entry.options.get("finished_charge_sessions", {}).items()
+            if isinstance(key, str) and "|" in key and isinstance(value, dict)
+        }
+        self._recovery_started_at = None
         self._lock = asyncio.Lock()
         self._last_notification = None
 
@@ -229,14 +234,67 @@ class AutomaticChargeController:
             return True
         return False
 
-    async def async_set_mode(self, mode):
+    def _persist_session(self, active):
+        """Persist current vehicle ownership without saving transient mode."""
+        session = (
+            {"active": True, "target": self.owned_target,
+             "day": self.owned_day, "deadline": self.owned_deadline.isoformat()}
+            if active and self.owned_deadline else {"active": False}
+        )
+        if hasattr(self.manual, "_save_options"):
+            self.manual._save_options(automatic_session=session)
+
+    def _persist_finished(self):
+        history = {
+            f"{day}|{date}": value
+            for (day, date), value in list(self.finished_deadlines.items())[-35:]
+        }
+        if hasattr(self.manual, "_save_options"):
+            self.manual._save_options(
+                finished_charge_sessions=history,
+                automatic_session={"active": False},
+            )
+
+    async def async_restore(self):
+        """Restore session ownership, never send an unconditional START.
+
+        A previous automatic session is RECOVERING until Geely's own switch,
+        SoC and power can be read. The existing policy then decides whether
+        more charging is authorised. Automatic user intent is separate.
+        """
+        saved = self.entry.options.get("automatic_session", {})
+        if (not isinstance(saved, dict) or saved.get("active") is not True
+                or self.manual.owned):
+            return
+        try:
+            target = int(saved["target"])
+            day = saved["day"]
+            deadline = datetime.fromisoformat(saved["deadline"])
+            if (not 50 <= target <= 100 or day not in
+                    ("monday", "tuesday", "wednesday", "thursday",
+                     "friday", "saturday", "sunday")
+                    or deadline.tzinfo is None):
+                raise ValueError("Invalid persisted charge session")
+        except (KeyError, ValueError, TypeError):
+            return
+        self.owned = True
+        self.owned_target = target
+        self.owned_day = day
+        self.owned_deadline = deadline
+        self.started_at = dt_util.utcnow()
+        self._recovery_started_at = dt_util.utcnow()
+        self.saw_charging = False
+        self.off_checks = 0
+        self._update("RECOVERING", "Previous scheduled charge restored; checking Geely")
+
+    async def async_set_mode(self, mode, deliberate=True):
         if mode not in MODES:
             raise ValueError("Unsupported automatic controller mode")
         async with self._lock:
             old_mode = self.mode
             self.mode = mode
             self.unexpected_since = None
-            if (mode == "Active" and old_mode != "Active"
+            if (mode == "Active" and deliberate and old_mode != "Active"
                     and not self.owned and self.stop_requested_at is None):
                 # For the temporary test UI, returning to Active is an
                 # explicit request to resume a previously stopped charge.
@@ -314,11 +372,19 @@ class AutomaticChargeController:
         # This is a deliberately new authorised session. It must not be
         # mistaken for a delayed rebound from a previous STOP.
         self.stop_watch_until = None
+        # Symmetric ownership transfer: a prior manual STOP watchdog must not
+        # cancel a newly authorised automatic charge.
+        if hasattr(self.manual, "stop_watch_until"):
+            self.manual.stop_watch_until = None
         self.owned = True
         self.owned_target = plan.target
         self.owned_day = plan.day
         self.owned_deadline = plan.ready_by
         self.started_at = dt_util.utcnow()
+        self._recovery_started_at = None
+        self._persist_session(True)
+        if hasattr(self.manual, "_save_options"):
+            self.manual._save_options(manual_session={"active": False})
         self.saw_charging = False
         self.off_checks = 0
         self._update("STARTING", f"Starting {plan.day} charge to {plan.target}%", plan)
@@ -400,6 +466,8 @@ class AutomaticChargeController:
         self.stop_attempts = 0
         self.stop_context = ""
         self.unexpected_since = None
+        self._recovery_started_at = None
+        self._persist_finished()
         self._update(state, message)
 
     async def _reconcile_owned_schedule(self):
@@ -541,6 +609,33 @@ class AutomaticChargeController:
                 return
 
             if self.owned:
+                if self._recovery_started_at is not None:
+                    # Cloud switch telemetry often lags actual wallbox power.
+                    # Hold the previous ownership for a bounded grace period
+                    # instead of issuing duplicate START or a false STOP.
+                    if self._charging():
+                        self.saw_charging = True
+                        self._recovery_started_at = None
+                    elif (dt_util.utcnow() - self._recovery_started_at
+                          < timedelta(seconds=90)):
+                        self._update(
+                            "RECOVERING",
+                            "Checking previous charge after Home Assistant restart",
+                        )
+                        return
+                    elif self._soc() is None or self._raw(self.manual.charging_switch) not in ("on", "off"):
+                        self._update("RECOVERING", "Geely telemetry unavailable on restart")
+                        return
+                    elif self._soc() >= self.owned_target:
+                        self._release("COMPLETED", "Previous session reached target")
+                        return
+                    else:
+                        # Clear a definitely inactive old session. The enabled
+                        # schedule will be recalculated on the next tick; no
+                        # duplicate ON is sent by restore itself.
+                        self.stop_context = "Schedule revised; charging not yet needed"
+                        self._release("INTERRUPTED", "Recovered stopped session below target")
+                        return
                 # A latched session remains authorised after the calculated
                 # start time shifts with rising SOC and after ready-by.
                 if self._emergency() or not self._legacy_clear():
@@ -572,7 +667,11 @@ class AutomaticChargeController:
                     self.off_checks += 1
                 if self.saw_charging and self.off_checks >= 2:
                     soc = self._soc()
-                    if soc is not None and soc >= self.owned_target:
+                    if soc is not None and (soc >= self.owned_target
+                            or (self.owned_target == 100 and soc >= 99)):
+                        # Geely may terminate balancing while cloud SoC
+                        # rounds down to 99%. Require the observed OFF state;
+                        # never use 99% alone to send a stop command.
                         self._release("COMPLETED", "Geely finished the scheduled target")
                         self._notice("complete", "Scheduled charging completed")
                     else:
