@@ -304,6 +304,17 @@ class AutomaticChargeController:
         else:
             self._update("RECOVERING", "Previous scheduled charge restored; checking Geely")
 
+    async def async_request_resume(self):
+        """Real Resume schedule action, even if already persistently enabled."""
+        async with self._lock:
+            if (self.mode != "Active" or self.owned
+                    or self.stop_requested_at is not None
+                    or getattr(self.manual, "unmanaged_charge", False)
+                    or self.manual.owned):
+                return
+            self._rearm_if_requested(self._policy(), deliberate=True)
+        await self.async_tick()
+
     async def async_set_mode(self, mode, deliberate=True):
         if mode not in MODES:
             raise ValueError("Unsupported automatic controller mode")
@@ -364,8 +375,8 @@ class AutomaticChargeController:
             else:
                 self._update(
                     "PAUSED",
-                    "Previous charge ended before target; deliberate resume "
-                    "is needed (Off then Active in test UI)",
+                    "Previous charge ended before target; use Resume schedule "
+                    "when vehicle is safe to charge again",
                     plan,
                 )
             return
