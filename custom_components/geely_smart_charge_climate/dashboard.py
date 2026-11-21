@@ -11,6 +11,7 @@ from homeassistant.components import frontend, lovelace
 from homeassistant.components.lovelace import dashboard as lovelace_dashboard
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.const import CONF_ICON
+from homeassistant.helpers import entity_registry as er
 
 from .weekly_schedule import DAY_NAMES
 
@@ -22,7 +23,7 @@ def _entity_rows(entities: list[str]) -> dict:
     return {"type": "entities", "show_header_toggle": False, "entities": entities}
 
 
-def build_dashboard(entry) -> dict:
+def build_dashboard(entry, observer_id="sensor.observer_status", simulation_id="sensor.simulation_decision") -> dict:
     """Generate stable four-tab dashboard using configured Geely sources.
 
     Do not include vehicle speed; Geely Connect may mark it unavailable in park.
@@ -61,12 +62,12 @@ def build_dashboard(entry) -> dict:
                     {"type": "entities", "title": "Live vehicle and charging",
                      "show_header_toggle": False,
                      "entities": charge_entities + [
-                         "sensor.observer_status",
-                         "sensor.simulation_decision",
+                         observer_id,
+                         simulation_id,
                      ]},
                     {"type": "entities", "title": "Simulated charge plan",
                      "entities": [
-                         {"entity": "sensor.simulation_decision",
+                         {"entity": simulation_id,
                           "name": "Advisory decision"},
                      ]},
                 ],
@@ -103,12 +104,10 @@ def build_dashboard(entry) -> dict:
                 "cards": [
                     {"type": "markdown", "content":
                      "## Charging statistics\n"
-                     "Charging-rate learning and simulation diagnostics. "
-                     "No driving-speed telemetry is collected."},
+                     "Charging-rate learning and simulation diagnostics."},
                     {"type": "history-graph", "title": "Battery charge history",
                      "hours_to_show": 48, "entities": [battery]},
-                    _entity_rows(["sensor.simulation_decision",
-                                  "sensor.observer_status"]),
+                    _entity_rows([simulation_id, observer_id]),
                 ],
             },
         ],
@@ -149,9 +148,12 @@ async def async_ensure_dashboard(hass, entry) -> None:
         "show_in_sidebar": True,
         "require_admin": False,
     })
+    registry = er.async_get(hass)
+    observer = registry.async_get_entity_id("sensor", "geely_smart_charge_climate", f"{entry.entry_id}_observer_status") or "sensor.observer_status"
+    simulation = registry.async_get_entity_id("sensor", "geely_smart_charge_climate", f"{entry.entry_id}_simulation_decision") or "sensor.simulation_decision"
     store = lovelace_dashboard.LovelaceStorage(hass, item)
     data.dashboards[DASHBOARD_URL] = store
-    await store.async_save(build_dashboard(entry))
+    await store.async_save(build_dashboard(entry, observer, simulation))
     frontend.async_register_built_in_panel(
         hass,
         lovelace.DOMAIN,
