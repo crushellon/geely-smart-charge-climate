@@ -23,6 +23,12 @@ class DashboardTests(unittest.TestCase):
                     {"enabled": "switch", "target": "number", "ready_time": "time"}[role]
                     + f".{day}_{role}"
                 )
+        for profile in ("warm", "cool"):
+            for field in (
+                "temperature", "driver_seat_heat", "passenger_seat_heat",
+                "driver_seat_vent", "passenger_seat_vent", "steering_heat",
+            ):
+                self.ids[f"{profile}_{field}"] = f"number.{profile}_{field}"
         self.config = module.dashboard_config(
             self.ids, "sensor.my_geely_ex5_4034_battery",
             "binary_sensor.my_geely_ex5_4034_charger_plug",
@@ -34,6 +40,14 @@ class DashboardTests(unittest.TestCase):
             [v["path"] for v in self.config["views"]],
             ["charging", "climate", "schedule", "statistics"],
         )
+
+    def test_climate_comfort_controls(self):
+        climate = self.config["views"][1]["cards"]
+        self.assertEqual(len(climate), 3)
+        self.assertIn("number.warm_temperature",
+                      [item["entity"] for item in climate[1]["entities"]])
+        self.assertIn("number.cool_driver_seat_vent",
+                      [item["entity"] for item in climate[2]["entities"]])
 
     def test_seven_editable_day_cards(self):
         schedule = self.config["views"][2]["cards"]
