@@ -138,7 +138,7 @@ def dashboard_config(
             "**Off:** no automatic commands. "
             "**Monitor:** records decisions without touching the car. "
             "**Active:** permits scheduled charging and verified stopping of "
-            "unauthorised *home* charging only after safety checks. "
+            "unauthorised charging while Public Mode is OFF. "
             "This testing-stage mode resets to Off after a Home Assistant restart. "
             "Do not leave it unattended yet.",
         },
