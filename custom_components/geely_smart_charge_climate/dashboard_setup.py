@@ -39,6 +39,9 @@ def _dashboard_entity_ids(hass, entry) -> dict[str, str] | None:
         "scheduled_climate_status": (
             "sensor", f"{entry.entry_id}_scheduled_climate_status"
         ),
+        "scheduled_climate_enabled": (
+            "switch", f"{entry.entry_id}_scheduled_climate_enabled"
+        ),
         "live_test_status": ("sensor", f"{entry.entry_id}_live_test_status"),
         "automatic_charge_decision": ("sensor", f"{entry.entry_id}_automatic_charge_decision"),
         "public_charging_mode": ("switch", f"{entry.entry_id}_public_charging_mode"),
