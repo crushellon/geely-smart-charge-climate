@@ -33,6 +33,18 @@ class DashboardTests(unittest.TestCase):
                 self.ids[f"{profile}_{occupant}_seat_mode"] = f"select.{profile}_{occupant}_seat_mode"
             self.ids[f"{profile}_steering_toggle"] = f"switch.{profile}_steering_toggle"
             self.ids[f"show_{profile}_settings"] = f"switch.show_{profile}_settings"
+        self.ids["climate_next"] = "sensor.climate_next"
+        for slot in range(1, 8):
+            for field, prefix in (
+                ("enabled", "switch"), ("day", "select"),
+                ("ready_time", "time"), ("temperature", "number"),
+                ("driver_seat", "select"), ("passenger_seat", "select"),
+                ("steering_heat", "switch"), ("lead_minutes", "number"),
+                ("hold_minutes", "number"),
+            ):
+                self.ids[f"climate_slot_{slot}_{field}"] = (
+                    f"{prefix}.climate_slot_{slot}_{field}"
+                )
         self.config = module.dashboard_config(
             self.ids, "sensor.my_geely_ex5_4034_battery",
             "binary_sensor.my_geely_ex5_4034_charger_plug",
@@ -47,7 +59,7 @@ class DashboardTests(unittest.TestCase):
 
     def test_climate_comfort_controls(self):
         climate = self.config["views"][1]["cards"]
-        self.assertEqual(len(climate), 5)
+        self.assertEqual(len(climate), 14)
         self.assertEqual(climate[2]["type"], "conditional")
         self.assertEqual(climate[4]["type"], "conditional")
         cool = [item["entity"] for item in climate[2]["card"]["entities"]]
@@ -57,6 +69,12 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("select.warm_passenger_seat_mode", warm)
         self.assertIn("switch.warm_steering_toggle", warm)
         self.assertEqual(climate[2]["conditions"][0]["entity"], "switch.show_cool_settings")
+        self.assertEqual(climate[7]["title"], "Climate schedule 1")
+        self.assertEqual(climate[13]["title"], "Climate schedule 7")
+        self.assertIn(
+            "select.climate_slot_1_driver_seat",
+            [row["entity"] for row in climate[7]["entities"] if "entity" in row],
+        )
 
     def test_seven_editable_day_cards(self):
         schedule = self.config["views"][2]["cards"]
