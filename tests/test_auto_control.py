@@ -235,18 +235,99 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.auto.async_tick()
         self.assertEqual(self.auto.status, "COMPLETED")
 
-    async def test_completed_session_does_not_restart_in_same_window(self):
+    async def test_early_geely_stop_is_interrupted_and_does_not_loop(self):
         await self.auto.async_set_mode("Active")
         self.assertEqual(self.services.calls, ["turn_on"])
         await self.auto.async_tick()  # Observe charging ON before a later stop.
-        # Geely ends the session before target (network or car decides).
+        # Geely ends the session at 60%, below the 80% requested target.
         self.values["switch.car"] = "off"
         self.values["sensor.power"] = "0"
         await self.auto.async_tick()
         await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "INTERRUPTED")
+        self.assertEqual(self.auto.finished_deadlines[
+            ("monday", "2026-11-23")]["outcome"], "interrupted")
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "PAUSED")
+        self.assertEqual(self.services.calls, ["turn_on"])
+        # Explicitly returning to Active is an attended request to resume.
+        await self.auto.async_set_mode("Off")
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_on"])
+        self.assertEqual(self.auto.owned_target, 80)
+
+    async def test_stopped_below_new_100_target_can_start_again(self):
+        # Recreate user journey: reach 79%, stop; update departure to 100%.
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 79
+        await self.auto.async_set_mode("Active")
+        self.values["sensor.battery"] = "79"
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+        self.assertEqual(self.auto.finished_deadlines[
+            ("monday", "2026-11-23")]["outcome"], "completed")
+        # Merely editing ready-by clock time must not restart target 79%.
+        self.entry.options["weekly_schedule"]["monday"]["ready_time"] = "08:00"
+        self.values["sensor.battery"] = "78"  # Stale SoC rollback
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
         self.assertEqual(self.auto.status, "COMPLETED")
+        # Raising target is a new explicit charging request, even on same date.
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off", "turn_on"])
+        self.assertTrue(self.auto.owned)
+        self.assertEqual(self.auto.owned_target, 100)
+
+    async def test_manual_mode_cancellation_requires_deliberate_rearm(self):
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_set_mode("Off")
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+        self.assertEqual(self.auto.finished_deadlines[
+            ("monday", "2026-11-23")]["outcome"], "cancelled")
+        # Mode was already Off; merely ticking does not re-start.
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        # Explicitly choosing Active again after stop confirmation re-arms.
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off", "turn_on"])
+
+    async def test_disabling_and_reenabling_schedule_is_new_request(self):
+        await self.auto.async_set_mode("Active")
+        self.entry.options["weekly_schedule"]["monday"]["enabled"] = False
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+        self.assertEqual(self.auto.finished_deadlines[
+            ("monday", "2026-11-23")]["outcome"], "disabled")
+        self.entry.options["weekly_schedule"]["monday"]["enabled"] = True
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off", "turn_on"])
+
+    async def test_true_100_completion_does_not_restart_without_new_request(self):
+        self.entry.options["weekly_schedule"]["monday"]["target"] = 100
+        await self.auto.async_set_mode("Active")
+        self.values["sensor.battery"] = "100"
+        self.values["switch.car"] = "off"
+        self.values["sensor.power"] = "0"
+        # First observe active charge, then Geely finishing.
+        self.auto.saw_charging = True
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "COMPLETED")
+        self.assertEqual(self.auto.finished_deadlines[
+            ("monday", "2026-11-23")]["outcome"], "completed")
+        self.values["sensor.battery"] = "99"  # Telemetry step-down.
         await self.auto.async_tick()
         self.assertEqual(self.services.calls, ["turn_on"])
+        self.assertEqual(self.auto.status, "COMPLETED")
 
     async def test_100_survives_graceful_reload(self):
         self.entry.options["weekly_schedule"]["monday"]["target"] = 100
