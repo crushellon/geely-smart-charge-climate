@@ -104,7 +104,10 @@ class AutomaticChargeController:
     def _charging(self):
         state = self._raw(self.manual.charging_switch)
         power = self._power()
-        return state == "on" or (power is not None and power > 0.25)
+        wallbox = (self.manual._wallbox_kw()
+                   if hasattr(self.manual, "_wallbox_kw") else None)
+        return (state == "on" or (power is not None and power > 0.25)
+                or (wallbox is not None and wallbox > 0.25))
 
     def _stop_telemetry_fresh(self):
         """Never verify STOP using cached states from before the command.
@@ -131,12 +134,15 @@ class AutomaticChargeController:
 
     def _stopped(self):
         power = self._power()
-        # Require positive post-command Geely reports. The Geely switch is
-        # mandatory; power is optional, but corroborates when configured.
+        wallbox = (self.manual._wallbox_kw()
+                   if hasattr(self.manual, "_wallbox_kw") else None)
+        # Geely OFF/0 is not physical proof when an optional wallbox still
+        # reports charging. This is corroboration only, not a requirement.
         return (
             self._stop_telemetry_fresh()
             and self._raw(self.manual.charging_switch) == "off"
             and (power is None or power <= 0.25)
+            and (wallbox is None or wallbox <= 0.25)
         )
 
     def _legacy_clear(self):
