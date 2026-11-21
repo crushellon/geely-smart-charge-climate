@@ -92,6 +92,8 @@ class LiveChargeController:
         )
 
     def preflight(self):
+        if self.entry.options.get("emergency_stop", False) is True:
+            return "Emergency stop is latched; release it before charging"
         if self.public_mode():
             return "Public charging mode is enabled"
         guards = self._guards()
@@ -166,6 +168,36 @@ class LiveChargeController:
         if isinstance(value, bool) or int(value) != value or not 50 <= value <= 100:
             raise ValueError("Manual test target must be 50–100%")
         self.target = int(value)
+        self._notify()
+
+    async def async_emergency_stop(self):
+        """Explicit user STOP, even if no controller owns the session."""
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            options={**self.entry.options, "emergency_stop": True},
+        )
+        if self.auto.mode != "Off":
+            await self.auto.async_set_mode("Off")
+        async with self.auto._lock:
+            if self.public_mode():
+                self.auto._update(
+                    "BLOCKED",
+                    "Emergency stop latched, but Public Mode blocks vehicle commands",
+                )
+            elif self.auto.stop_requested_at is None:
+                await self.auto._request_stop("Emergency STOP requested")
+        if self.owned and not self.public_mode():
+            async with self._lock:
+                if self.stop_requested_at is None:
+                    await self._stop_locked("Emergency STOP requested")
+        self._notify()
+
+    async def async_release_emergency_stop(self):
+        """Release latch without silently enabling charging."""
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            options={**self.entry.options, "emergency_stop": False},
+        )
         self._notify()
 
     async def async_start_manual(self, target=None):
@@ -382,7 +414,8 @@ class LiveChargeController:
                         self._notify()
                 return
 
-            if any(guards.get(key) not in (None, "off") for key in MONITORED_GUARDS):
+            if (self.entry.options.get("emergency_stop", False) is True
+                    or any(guards.get(key) not in (None, "off") for key in MONITORED_GUARDS)):
                 await self._stop_locked("Safety interlock activated")
                 return
 
