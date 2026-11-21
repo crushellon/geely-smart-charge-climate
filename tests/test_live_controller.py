@@ -23,7 +23,20 @@ spec.loader.exec_module(safety)
 tree = ast.parse((ROOT / "live_control.py").read_text(encoding="utf-8"))
 body = next(node for node in tree.body
             if isinstance(node, ast.ClassDef) and node.name == "LiveChargeController")
+class DummyAutomatic:
+    def __init__(self, manual):
+        self.owned = False
+        self.stop_requested_at = None
+
+    async def async_tick(self):
+        return None
+
+    async def async_shutdown(self):
+        return None
+
+
 env = {
+    "AutomaticChargeController": DummyAutomatic,
     "asyncio": asyncio,
     "isfinite": isfinite,
     "timedelta": timedelta,
