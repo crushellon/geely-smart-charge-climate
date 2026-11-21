@@ -44,7 +44,11 @@ class DummyAutomatic:
         self.mode = mode
 
     async def _request_stop(self, message):
-        return None
+        self.stop_requested_at = datetime.now(timezone.utc)
+        await self.manual.hass.services.async_call(
+            "switch", "turn_off",
+            {"entity_id": self.manual.charging_switch}, blocking=True,
+        )
 
     def _update(self, status, message):
         return None
