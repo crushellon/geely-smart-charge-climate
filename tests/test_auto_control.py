@@ -138,6 +138,7 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
     async def test_completed_session_does_not_restart_in_same_window(self):
         await self.auto.async_set_mode("Active")
         self.assertEqual(self.services.calls, ["turn_on"])
+        await self.auto.async_tick()  # Observe charging ON before a later stop.
         # Geely ends the session before target (network or car decides).
         self.values["switch.car"] = "off"
         self.values["sensor.power"] = "0"
