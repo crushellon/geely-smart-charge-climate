@@ -19,7 +19,7 @@ from .const import (
     CONF_CHARGING_SWITCH,
     DOMAIN,
 )
-from .discovery import discover_plug_entity
+from .discovery import discover_plug_entity, discover_charging_power_entity
 from .dashboard_content import DAYS, dashboard_config
 from .comfort import PROFILES, FIELDS
 from .climate_schedule import SLOTS
@@ -191,7 +191,8 @@ async def async_ensure_dashboard(hass, entry) -> None:
         entity_ids,
         battery=entry.data[CONF_BATTERY_ENTITY],
         plug=discover_plug_entity(hass, entry.data[CONF_BATTERY_ENTITY]),
-        charging_power=entry.data.get(CONF_CHARGING_POWER),
+        charging_power=(entry.data.get(CONF_CHARGING_POWER)
+                        or discover_charging_power_entity(hass, entry.data[CONF_BATTERY_ENTITY])),
         charging_switch=entry.data.get(CONF_CHARGING_SWITCH),
         extra_sensors=_optional_vehicle_sensors(hass, entry),
         charger_sensors=_optional_wall_connector_sensors(hass),
@@ -297,7 +298,8 @@ async def _maybe_upgrade_existing_dashboard(hass, entry, stored_dashboard) -> No
         ids,
         battery=entry.data[CONF_BATTERY_ENTITY],
         plug=discover_plug_entity(hass, entry.data[CONF_BATTERY_ENTITY]),
-        charging_power=entry.data.get(CONF_CHARGING_POWER),
+        charging_power=(entry.data.get(CONF_CHARGING_POWER)
+                        or discover_charging_power_entity(hass, entry.data[CONF_BATTERY_ENTITY])),
         charging_switch=entry.data.get(CONF_CHARGING_SWITCH),
         extra_sensors=_optional_vehicle_sensors(hass, entry),
     )
@@ -361,7 +363,8 @@ async def _refresh_generated_dashboard(hass, entry, stored_dashboard) -> None:
         ids,
         battery=entry.data[CONF_BATTERY_ENTITY],
         plug=discover_plug_entity(hass, entry.data[CONF_BATTERY_ENTITY]),
-        charging_power=entry.data.get(CONF_CHARGING_POWER),
+        charging_power=(entry.data.get(CONF_CHARGING_POWER)
+                        or discover_charging_power_entity(hass, entry.data[CONF_BATTERY_ENTITY])),
         charging_switch=entry.data.get(CONF_CHARGING_SWITCH),
         extra_sensors=_optional_vehicle_sensors(hass, entry),
     )
