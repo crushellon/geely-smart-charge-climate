@@ -226,7 +226,7 @@ def dashboard_config(
         "show_header_toggle": False,
         "entities": [
             {"entity": manual_target_id, "name": "Target percentage"},
-            {"entity": entity_ids["live_test_status"], "name": "Manual charge status"},
+            {"entity": entity_ids["manual_charge_status"], "name": "Manual charge status"},
         ],
     }
     manual_preview = {
