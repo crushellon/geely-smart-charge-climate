@@ -148,6 +148,19 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.manual.stop_watch_until)
         self.assertEqual(self.services.calls, ["turn_on"])
 
+    async def test_optional_wallbox_power_prevents_false_automatic_stop(self):
+        self.manual._wallbox_kw = lambda: 6.89
+        await self.auto.async_set_mode("Active")
+        self.values["sensor.battery"] = "80"
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.manual._wallbox_kw = lambda: 0.0
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+
     async def test_immediate_off_does_not_verify_before_settling(self):
         # Reproduces START -> Off within moments, when cloud feedback is not
         # trustworthy enough to declare a verified physical stop.
