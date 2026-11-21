@@ -80,6 +80,11 @@ def independent_climate_schedule_cards(entity_ids: dict[str, str]) -> list[dict]
             "entity": entity_ids["climate_next"],
             "name": "Next independent climate appointment",
         },
+        {
+            "type": "entity",
+            "entity": entity_ids["scheduled_climate_status"],
+            "name": "Live climate scheduler",
+        },
     ]
     for slot in range(1, 8):
         pre = f"climate_slot_{slot}_"
@@ -297,11 +302,11 @@ def dashboard_config(
         manual_buttons, manual_climate, manual_climate_buttons,
         {"type": "markdown", "content": "### Charging telemetry\n" + power_details},
         {"type": "markdown", "content":
-         "**Testing limitation:** Automatic charging currently requires re-enabling "
-         "and the saved automatic-charging preference are restored after a "
-         "Home Assistant restart, subject to safety interlocks. Public "
-         "charging mode must be ON for public sessions. Climate schedules "
-         "send cabin commands independently from charging."},
+         "**Controller:** Automatic charging preference and active sessions "
+         "are restored after Home Assistant restarts, subject to Geely "
+         "telemetry and safety interlocks. Public charging mode must be ON "
+         "for public sessions. Independent climate schedules operate "
+         "without a charging cable."},
     ]
 
     stats_cards = [
@@ -561,8 +566,8 @@ def dashboard_config(
                 "type": "sections",
                 "max_columns": 2,
                 "sections": [
-                    _section(all_climate[:2] + all_climate[2::2]),
-                    _section(all_climate[3::2]),
+                    _section(all_climate[:3] + all_climate[3::2]),
+                    _section(all_climate[4::2]),
                 ],
             },
             {
