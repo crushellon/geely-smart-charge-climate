@@ -50,6 +50,19 @@ class ScheduledClimateController:
             if self.active else "Ready for scheduled comfort"
         )
 
+    def _push_climate(self, action, session, success=True):
+        notifier = getattr(self.manual, "push", None)
+        if notifier is None:
+            return
+        climate_entity = self.manual.climate.entities.get("climate")
+        reading = self.manual._raw(climate_entity)
+        notifier.climate_event(
+            key=session["key"], action=action, kind=session["kind"],
+            setting=session.get("settings"),
+            time=session.get("ready_by"),
+            vehicle_state=reading, success=success,
+        )
+
     def _arm_manual_expiry(self):
         """Schedule exact cutoff; periodic 15-second tick is fallback.
 
@@ -192,6 +205,14 @@ class ScheduledClimateController:
                     # never calls any Geely charging switch.
                     off_ok = await self.manual.climate.apply("off")
                     if off_ok:
+                        if hasattr(self.manual, "push"):
+                            self.manual.push.emit(
+                                f"manual:climate:timeout:{self.manual_expires_at}",
+                                "Geely manual comfort timed out",
+                                "30 minutes elapsed. Cabin, driver/passenger "
+                                "seats and steering-wheel OFF requests accepted; "
+                                "check Geely's actual climate state if needed.",
+                            )
                         self.manual_override = False
                         self.manual_expires_at = None
                         self._manual_off_attempts = 0
@@ -207,6 +228,14 @@ class ScheduledClimateController:
                         )
                         return
                     if self._manual_off_attempts >= MANUAL_OFF_MAX_ATTEMPTS:
+                        if hasattr(self.manual, "push"):
+                            self.manual.push.emit(
+                                f"manual:climate:timeout-failed:{self.manual_expires_at}",
+                                "Geely manual comfort OFF FAILED",
+                                "Automatic 30-minute OFF was attempted three "
+                                "times without complete service acknowledgement. "
+                                "Check vehicle cabin, seats and wheel directly.",
+                            )
                         # Do not leave the scheduling controller locked in
                         # MANUAL forever, but preserve a visible failure.
                         self.manual_override = False
@@ -295,6 +324,7 @@ class ScheduledClimateController:
                         }
                         self._persist(scheduled_climate_session=self.active)
                         self.status = "RUNNING"
+                        self._push_climate("on", self.active)
                     else:
                         self.active = None
                         self._mark_finished(key)
@@ -304,7 +334,9 @@ class ScheduledClimateController:
 
                 # Existing schedule expired, was disabled, changed time or
                 # emergency interlock engaged. Never stop a manual override.
+                finished = dict(self.active)
                 success = await self.manual.climate.stop_scheduled()
+                self._push_climate("off", finished, success=success)
                 old_key = self.active["key"]
                 self.active = None
                 self._mark_finished(old_key)
@@ -368,7 +400,9 @@ class ScheduledClimateController:
             }
             self.active = {
                 "active": True, "key": choice["key"],
-                "kind": choice["kind"], "end_at": choice["end_at"].isoformat(),
+                "kind": choice["kind"],
+                "ready_by": choice["ready_by"].isoformat(),
+                "end_at": choice["end_at"].isoformat(),
                 "settings": settings, "applied": False,
                 "last_applied_at": now.isoformat(),
             }
@@ -393,4 +427,5 @@ class ScheduledClimateController:
             self._persist(scheduled_climate_session=self.active)
             self.status = "RUNNING"
             self.message = f"{choice['kind']} comfort scheduled until {choice['end_at'].isoformat()}"
+            self._push_climate("on", self.active)
             self.manual._notify()
