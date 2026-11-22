@@ -78,6 +78,12 @@ class DummyScheduledClimate:
     async def async_manual_override(self, action):
         return None
 
+    async def async_manual_result(self, action, success):
+        return None
+
+    async def async_shutdown(self):
+        return None
+
 
 class DummyClimate:
     def __init__(self, hass, entry, notify):
@@ -86,6 +92,7 @@ class DummyClimate:
 
     async def apply(self, action):
         self.status = action
+        return True
 
 
 env = {
