@@ -495,6 +495,11 @@ class AutomaticChargeController:
             )
             outcome = (
                 "completed" if reached_target
+                else "expired" if self.stop_context in (
+                    "Scheduled ready-by deadline reached",
+                    "100% ready-by deadline passed without confirmed prior charging",
+                    "100% session disconnected after ready-by; expired",
+                )
                 else "disabled" if self.stop_context == "Scheduled charge disabled while running"
                 else "deferred" if self.stop_context == "Schedule revised; charging not yet needed"
                 else "interrupted" if state == "INTERRUPTED"
