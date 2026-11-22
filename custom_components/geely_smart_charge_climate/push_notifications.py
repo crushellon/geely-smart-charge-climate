@@ -199,25 +199,42 @@ class VehiclePushNotifications:
         )
 
     def _fresh_vehicle_feedback(self, started_at):
-        """Never label stale pre-command power as a newly started charge."""
-        if started_at is None:
+        """Positive power must come from the SAME freshly reported sensor.
+
+        A new Geely 0 kW report cannot make stale Tesla 6 kW valid.
+        If neither power sensor exists, Geely switch ON is the fallback.
+        """
+        if started_at is None or not hasattr(self.hass, "states"):
             return False
-        sources = [
-            self.runtime.charging_power,
-            getattr(self.runtime, "wallbox_power", None),
-        ]
-        if self.runtime.charging_power is None:
-            sources.append(self.runtime.charging_switch)
-        for entity in sources:
-            if not entity:
-                continue
-            state = self.hass.states.get(entity) if hasattr(self.hass, "states") else None
+
+        def fresh(state):
             if state is None:
-                continue
+                return False
             stamp = (getattr(state, "last_reported", None)
                      or getattr(state, "last_updated", None))
-            if stamp is not None and stamp.tzinfo is not None and stamp >= started_at:
-                return True
+            return (isinstance(stamp, datetime) and stamp.tzinfo is not None
+                    and stamp >= started_at)
+
+        for entity in (
+            self.runtime.charging_power,
+            getattr(self.runtime, "wallbox_power", None),
+        ):
+            if not entity:
+                continue
+            state = self.hass.states.get(entity)
+            if state is None or not fresh(state):
+                continue
+            try:
+                power = float(state.state)
+                if isfinite(power) and power > 0.25:
+                    return True
+            except (ValueError, TypeError):
+                pass
+
+        if (self.runtime.charging_power is None
+                and self.runtime._wallbox_kw() is None):
+            switch = self.hass.states.get(self.runtime.charging_switch)
+            return fresh(switch) and switch.state == "on"
         return False
 
     def observe_charging(self):
