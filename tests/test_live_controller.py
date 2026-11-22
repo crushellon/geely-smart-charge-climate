@@ -121,6 +121,8 @@ class DummyClimate:
 env = {
     "AutomaticChargeController": DummyAutomatic,
     "ManualClimateController": DummyClimate,
+    "VehiclePushNotifications": DummyPush,
+    "fresh_event_id": fake_fresh_event_id,
     "ScheduledClimateController": DummyScheduledClimate,
     "vehicle_activity": activity.vehicle_activity,
     "MANUAL_STOP_SETTLE": timedelta(0),
