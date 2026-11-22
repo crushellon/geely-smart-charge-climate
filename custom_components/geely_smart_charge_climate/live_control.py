@@ -672,16 +672,25 @@ class LiveChargeController:
         if self.owned:
             async with self._lock:
                 await self._stop_locked("User requested manual stop")
+            requested = self.stop_requested_at is not None
             self.push.emit(
                 fresh_event_id("manual-stop-requested"),
-                "Geely manual charging STOP requested",
-                "Stop sent to Geely. Waiting for confirmed charging OFF/zero power.",
+                "Geely manual charging STOP requested" if requested
+                else "Geely manual STOP blocked",
+                "STOP request issued; waiting for charging OFF/zero power."
+                if requested else
+                "Public charging mode prevented a vehicle STOP command.",
             )
             return
         if self.public_mode():
             self.status = "BLOCKED"
             self.message = "Public charging mode: use Geely to stop public charging"
             self._notify()
+            self.push.emit(
+                fresh_event_id("manual-stop-public-block"),
+                "Geely manual STOP blocked",
+                "Public Charging Mode is ON; stop directly in Geely.",
+            )
             return
         if self._vehicle_indicates_charging() or self.unmanaged_charge:
             # Use the automatic safety controller's already hardened STOP
