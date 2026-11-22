@@ -43,6 +43,7 @@ cls = next(x for x in tree.body if isinstance(x, ast.ClassDef)
 env = {"asyncio": asyncio, "datetime": datetime, "timedelta": timedelta,
        "dt_util": SimpleNamespace(now=lambda: clock["now"]),
        "candidate_windows": win.candidate_windows,
+       "callback": lambda fn: fn,  # Fake-HA @callback decorator for isolated tests.
        "MANUAL_COMFORT_MAX": timedelta(minutes=30),
        "MANUAL_OFF_RETRY": timedelta(seconds=60),
        "MANUAL_OFF_MAX_ATTEMPTS": 3,
