@@ -51,7 +51,7 @@ def time_label(iso_or_dt):
     try:
         dt = (datetime.fromisoformat(iso_or_dt)
               if isinstance(iso_or_dt, str) else iso_or_dt)
-        return dt.astimezone(dt_util.DEFAULT_TIME_ZONE).strftime("%a %d %b, %I:%M %p")
+        return dt_util.as_local(dt).strftime("%a %d %b, %I:%M %p")
     except (ValueError, TypeError, AttributeError):
         return str(iso_or_dt)
 
@@ -66,6 +66,7 @@ class VehiclePushNotifications:
         self.hass = runtime.hass
         self.entry = runtime.entry
         self.pending = set()
+        self.failed = set()
         self.delivered = set(
             str(key) for key in self.entry.options.get("push_delivered_ids", [])
         )
@@ -85,7 +86,8 @@ class VehiclePushNotifications:
 
     def emit(self, event_id, title, message):
         """Queue exactly once per event, never from every 15-second tick."""
-        if event_id in self.delivered or event_id in self.pending:
+        if (event_id in self.delivered or event_id in self.pending
+                or event_id in self.failed):
             return False
         self.pending.add(event_id)
         self.hass.async_create_task(
@@ -105,6 +107,7 @@ class VehiclePushNotifications:
                 blocking=True,
             )
         except Exception as exc:
+            self.failed.add(event_id)
             _LOGGER.warning(
                 "Geely iPhone notification %s failed using notify.%s: %s",
                 event_id, service, exc,
@@ -143,16 +146,22 @@ class VehiclePushNotifications:
                 options.get("scheduled_climate_enabled") is True
             ),
         }
-        for day, settings in days.items():
-            if isinstance(settings, dict):
-                result[f"{day.title()} charging schedule"] = settings.get("enabled") is True
-        for day, settings in linked.items():
-            if isinstance(settings, dict):
-                result[f"{day.title()} cabin comfort"] = settings.get("enabled") is True
-        if isinstance(slots, dict):
-            for slot, settings in slots.items():
-                if isinstance(settings, dict):
-                    result[f"Independent climate slot {slot}"] = settings.get("enabled") is True
+        for day in ("monday", "tuesday", "wednesday", "thursday",
+                    "friday", "saturday", "sunday"):
+            settings = days.get(day, {}) if isinstance(days, dict) else {}
+            result[f"{day.title()} charging schedule"] = (
+                isinstance(settings, dict) and settings.get("enabled") is True
+            )
+            linked_settings = linked.get(day, {}) if isinstance(linked, dict) else {}
+            result[f"{day.title()} cabin comfort"] = (
+                isinstance(linked_settings, dict)
+                and linked_settings.get("enabled") is True
+            )
+        for slot in range(1, 8):
+            settings = slots.get(str(slot), {}) if isinstance(slots, dict) else {}
+            result[f"Independent climate slot {slot}"] = (
+                isinstance(settings, dict) and settings.get("enabled") is True
+            )
         return result
 
     def check_control_changes(self):
