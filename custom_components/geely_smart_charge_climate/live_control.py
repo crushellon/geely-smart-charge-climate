@@ -597,6 +597,12 @@ class LiveChargeController:
             self.status = "ERROR"
             self.message = f"Stop service error: {type(exc).__name__}; verify in car"
             self._notify()
+            self.push.emit(
+                f"manual:stop-service-error:{self.started_at}:{self.stop_attempts}",
+                "Geely manual STOP error",
+                "Geely stop request failed; the car may still be charging. "
+                "Check charging power and stop directly in the vehicle if needed.",
+            )
             return  # Keep ownership and allow another explicit stop.
 
     def _finish(self, status, message):
@@ -767,6 +773,12 @@ class LiveChargeController:
                         self.status = "ERROR"
                         self.message = "Stop unconfirmed after 3 attempts: verify in car"
                         self._notify()
+                        self.push.emit(
+                            f"manual:stop-unconfirmed:{self.started_at}",
+                            "Geely manual STOP unconfirmed",
+                            "Home Assistant could not verify the vehicle stopped "
+                            "after three tries. Check charging power immediately.",
+                        )
                 return
 
             if (self.entry.options.get("emergency_stop", False) is True
