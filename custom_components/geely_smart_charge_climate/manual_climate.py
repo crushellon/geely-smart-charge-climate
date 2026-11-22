@@ -1,8 +1,8 @@
-"""Explicit user-operated EX5 comfort, independent of scheduled climate.
+"""Geely EX5 comfort commands for manual buttons and live schedules.
 
-This module only runs on a real button press. The charging-linked comfort
-and independent climate schedules are still configuration/simulation only.
-Every optional actuator is checked before issuing a service call.
+Each actuator is checked before an actual service call. The owner/controller
+handles manual 30-minute expiry, repeat actions and restart recovery; this
+adapter only applies or turns OFF vehicle climate/seats/steering.
 """
 import asyncio
 import logging
@@ -30,7 +30,7 @@ def geely_climate_entities(battery_entity):
 
 
 class ManualClimateController:
-    """Send only requested manual climate commands; no timer automation."""
+    """Apply real manual climate; owner enforces expiry outside this adapter."""
 
     def __init__(self, hass, entry, notify):
         self.hass = hass
@@ -119,7 +119,7 @@ class ManualClimateController:
                 self.status = "UNAVAILABLE"
                 self.message = "Geely climate entity not detected for this vehicle"
                 self.notify()
-                return
+                return False
             self.status = "REQUESTING"
             self.message = f"Sending manual {action} climate request"
             self.notify()
@@ -160,3 +160,4 @@ class ManualClimateController:
                 if main_ok else "Climate request failed or Geely entity unavailable"
             )
             self.notify()
+            return main_ok
