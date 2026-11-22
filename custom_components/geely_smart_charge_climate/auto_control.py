@@ -1,10 +1,9 @@
-"""Explicitly enabled EX5 charging scheduler and authorisation guard.
+"""Production EX5 charging scheduler with real ready-by deadlines.
 
-Three modes: Off (default after every HA restart), Monitor (decisions only),
-Active (real ON/OFF commands after interlocks). All commands use the same
-selected Geely switch as the successful attended manual test.
-
-Do not enable unattended charging until integration/restart recovery is proven.
+Automatic user intent persists across Home Assistant restarts. Internally the
+controller retains Off/Monitor/Active states for decision handling, but the
+product exposes only its normal Automatic charging enabled switch. All
+commands use the Geely switch, never the optional monitoring-only wallbox.
 """
 import asyncio
 from datetime import datetime, timedelta
