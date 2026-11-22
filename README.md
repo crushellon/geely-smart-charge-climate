@@ -2,9 +2,50 @@
 
 An early **experimental integration** for Home Assistant, designed for the **Geely EX5** using community Geely Connect telemetry. Other Geely models have not been verified.
 
-**Current build (v0.3.15 — manual comfort automatically switches OFF after 30 minutes; EX5 validation still required):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Charging-linked Cool/Warm runs whenever the specific EV Control departure day's comfort is enabled alongside its charging schedule. The separate Independent climate schedules enabled switch controls only the seven appointments on Climate Scheduler. Both functions retain manual climate priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
+**Current build (v0.3.16 — real Home Assistant iPhone push notifications for charging, manual controls, safety and climate; EX5/iPhone validation still required):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Charging-linked Cool/Warm runs whenever the specific EV Control departure day's comfort is enabled alongside its charging schedule. The separate Independent climate schedules enabled switch controls only the seven appointments on Climate Scheduler. Both functions retain manual climate priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
 
 **Public charging responsibility:** Turn **Public charging mode ON before connecting to any public charger**, and turn it OFF when returning to normal automatic charging. The integration does not detect home location or public charging automatically. When ON, automatic charging starts, unexpected-charge stops and manual charging commands from this integration are suppressed. The native switch persists across Home Assistant restarts. Existing `input_boolean.ev_public_charging_mode` installations are still honoured as an additional interlock, so both must be OFF to resume normal charging. The optional Tesla Wall Connector is never required for core control.
+
+## Real iPhone push notifications (v0.3.16)
+
+The integration now sends **real phone push notifications** using the
+existing Home Assistant Companion App service
+`notify.mobile_app_tims_iphone`, in addition to Home Assistant's
+historical controller log/inbox records. It does **not** require any
+new dashboard buttons, cards, test controls or external apps.
+
+- **Automatic charging started:** after freshly reported charging power
+  (not merely the ON command), with battery start %, requested target
+  and the correct departure calendar day/ready-by time.
+- **Automatic charging finished/stopped:** actual ending battery %,
+  target achieved or not achieved, stop reason/deadline, and
+  **estimated battery energy in kWh** from SoC change × 68.39 kWh.
+  This is *not* a wall-meter or charger-energy measurement.
+- **Manual Start chosen target / Quick 80 / Quick 100:** start push after
+  vehicle state actually reports charging. Manual STOP, retries,
+  confirmed stop and failure warnings get separate push messages.
+- **Real on/off controls:** automatic enabled, emergency latch/release,
+  Public Charging Mode, departure-day schedules, daily linked comfort,
+  independent climate schedule master/slots and comfort steering heating.
+  Purely visual Show Settings expanders never push.
+- **Manual Cool/Warm/Custom/OFF:** requested profile, cabin temperature,
+  seats and steering plus 30-minute auto-OFF expiration. Timeout success
+  and failure both push.
+- **Charging-linked and independent climate schedules:** one start and
+  one stop push per occurrence with configured settings and reported
+  Geely climate feedback, distinguishing a confirmed state from an
+  accepted cloud command.
+
+Recent push event IDs persist across HA restarts to suppress duplicate
+15-second polling alerts. If the phone notify service is missing, the
+integration logs a warning and displays a **failure** notification in
+Home Assistant; it never mislabels that as a delivered iPhone push.
+
+Use the normal dashboard and HA Developer Tools → States/History to
+observe actual control states. Confirm the iPhone is receiving pushes
+before relying on them for unattended charging alerts.
+
+See [v0.3.16 iPhone push setup and validation](docs/iphone-push-notifications.md).
 
 ## Manual comfort 30-minute auto-OFF (v0.3.15)
 
