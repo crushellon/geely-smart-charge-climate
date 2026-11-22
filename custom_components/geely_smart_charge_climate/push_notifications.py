@@ -307,12 +307,15 @@ class VehiclePushNotifications:
             if gain is not None else
             " Energy added unavailable (missing SoC telemetry)."
         )
-        achieved = valid_soc(end_soc) is not None and (
-            valid_soc(end_soc) >= (valid_soc(target) or 101)
-            or (target == 100 and valid_soc(end_soc) >= 99)
+        actual = valid_soc(end_soc)
+        wanted = valid_soc(target)
+        achieved = actual is not None and wanted is not None and actual >= wanted
+        near_full = (
+            wanted == 100 and actual is not None and 99 <= actual < 100
         )
         outcome = (
             "Target reached" if achieved else
+            "Geely reports 99%; 100% target not verified" if near_full else
             "Target not reached" if status in ("STOPPED", "COMPLETED", "INTERRUPTED")
             else "Control released; vehicle stop not confirmed"
         )
