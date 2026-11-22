@@ -121,6 +121,7 @@ env = {
         safety.OLD_FULL_CHARGE, safety.PUBLIC_MODE, safety.EMERGENCY_STOP,
     ),
     "PUBLIC_MODE": safety.PUBLIC_MODE,
+    "EMERGENCY_STOP": safety.EMERGENCY_STOP,
     "_LOGGER": SimpleNamespace(exception=lambda *a: None),
 }
 exec(compile(ast.Module(body=[body], type_ignores=[]), "live_control.py", "exec"), env)
