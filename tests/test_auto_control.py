@@ -263,6 +263,29 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.auto.async_tick()
         self.assertEqual(self.services.calls, ["turn_off"])
 
+    async def test_adopt_already_balancing_100_percent_before_cutoff(self):
+        global now
+        self.entry.options["weekly_schedule"]["monday"] = {
+            "enabled": True, "target": 100, "ready_time": "09:30"
+        }
+        now = datetime(2026, 11, 23, 9, 15,
+                       tzinfo=ZoneInfo("Australia/Brisbane"))
+        self.values["binary_sensor.plug"] = "off"
+        await self.auto.async_set_mode("Active")
+        self.values["binary_sensor.plug"] = "on"
+        self.values["switch.car"] = "on"
+        self.values["sensor.power"] = "1.2"
+        self.values["sensor.battery"] = "100"
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, [])
+        self.assertTrue(self.auto.owned)
+        self.assertTrue(self.auto.full_overrun_authorized)
+        now = datetime(2026, 11, 23, 10, 0,
+                       tzinfo=ZoneInfo("Australia/Brisbane"))
+        await self.auto.async_tick()
+        self.assertTrue(self.auto.owned)
+        self.assertEqual(self.services.calls, [])
+
     async def test_auto_running_session_persists_and_restores_without_second_start(self):
         self.manual._save_options = lambda **vals: self.entry.options.update(vals)
         self.entry.options["automatic_charging_enabled"] = True
