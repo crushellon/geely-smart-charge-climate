@@ -229,6 +229,22 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         rebuilt = LiveChargeController(self.controller.hass, self.controller.entry)
         self.assertEqual(rebuilt.target, 87)
 
+    async def test_new_charge_hours_after_startup_not_protected_as_legacy(self):
+        await self.controller.async_restore()
+        # During startup there was no active vehicle charging.
+        self.assertFalse(self.controller.unmanaged_charge)
+        # Later plug-in unexpectedly starts vehicle charging.
+        self.controller._startup_observation_until = (
+            datetime.now(timezone.utc) - timedelta(seconds=1)
+        )
+        self.states.data["switch.car"].state = "on"
+        self.states.data["sensor.power"].state = "6.5"
+        self.controller._observe_unmanaged()
+        # The active automatic schedule must now decide whether the new
+        # charge is authorised, and must NOT inherit old-reload protection.
+        self.assertFalse(self.controller.unmanaged_charge)
+        self.assertTrue(self.controller._vehicle_indicates_charging())
+
     async def test_preexisting_charge_is_detected_without_claiming_manual_target(self):
         self.states.data["switch.car"].state = "on"
         self.states.data["sensor.power"].state = "6.5"

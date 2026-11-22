@@ -2,9 +2,37 @@
 
 An early **experimental integration** for Home Assistant, designed for the **Geely EX5** using community Geely Connect telemetry. Other Geely models have not been verified.
 
-**Current build (v0.3.12 — finished four-tab dashboard and accurate physical charging state; EX5 validation still required):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Independent and charging-linked cabin climate appointments issue real Geely commands **after you enable the new Scheduled climate enabled master switch**, with manual priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
+**Current build (v0.3.13 — strict vehicle-ready deadline enforcement; EX5 validation still required):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Independent and charging-linked cabin climate appointments issue real Geely commands **after you enable the new Scheduled climate enabled master switch**, with manual priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
 
 **Public charging responsibility:** Turn **Public charging mode ON before connecting to any public charger**, and turn it OFF when returning to normal automatic charging. The integration does not detect home location or public charging automatically. When ON, automatic charging starts, unexpected-charge stops and manual charging commands from this integration are suppressed. The native switch persists across Home Assistant restarts. Existing `input_boolean.ev_public_charging_mode` installations are still honoured as an additional interlock, so both must be OFF to resume normal charging. The optional Tesla Wall Connector is never required for core control.
+
+## Strict ready-by charging cutoff (v0.3.13)
+
+- **50–99% scheduled charges stop at the exact ready-by deadline**, even
+  if the car has not reached the requested battery percentage. The previous
+  three-hour overrun has been removed. Target completion can still stop
+  earlier. The outcome is recorded as **expired** rather than completed.
+- **100% scheduled charges remain Geely-terminated** when a real charging
+  session was confirmed before ready-by. This includes balancing after
+  100% is displayed. A missed departure **cannot start later**; unplugging
+  after the deadline ends that session's exception. A configured Geely
+  or optional Tesla power sensor provides confirmation; if no charging-power
+  sensor exists, Geely's ON state is used before the cutoff.
+- A **new plug-in outside all valid charging windows** no longer inherits
+  the unknown-owner protection from earlier HA upgrades. Automatic control
+  checks unexpected charging and requests STOP after its existing short
+  debounce, with verified stop confirmation. A legitimate new charge within
+  an open schedule window can be adopted without a second START command.
+- A charge **already underway at Home Assistant startup** with an unknown
+  owner remains protected from blind cancellation until its actual origin
+  can be established. Manual charge, Public Charging Mode and Emergency
+  Stop retain priority.
+- **No dashboard changes, test buttons or new modes.** The same original
+  four-tab product remains the only control UI.
+
+See [the v0.3.13 ready-by rule and verification guide](docs/strict-ready-by-hard-stop.md).
+This controller logic is covered by automated regressions but still
+requires real Geely cloud/vehicle verification.
 
 ## Production dashboard and vehicle-state recovery (v0.3.12)
 
