@@ -112,7 +112,7 @@ class NotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("first", self.entry.options.get("push_delivered_ids", []))
         self.assertFalse(self.notifier.emit("first", "Geely", "message"))
         await self.flush()
-        self.assertEqual(len(warnings), 2)  # one log + one HA inbox warning
+        self.assertEqual(len(warnings), 1)  # inbox warning recorded by fake
 
     async def test_dispatcher_accepts_explicit_notify_dot_service_option(self):
         self.entry.options["phone_notification_service"] = (
