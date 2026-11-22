@@ -796,7 +796,7 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.auto.async_tick()
         await self.auto.async_tick()
         self.assertEqual(self.services.calls, [])
-        self.assertIn("origin unknown", self.auto.message)
+        self.assertIn("ownership unknown", self.auto.message)
 
     async def test_geely_only_works_without_charging_power_entity(self):
         self.manual.charging_power = None
