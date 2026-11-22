@@ -7,7 +7,12 @@ HA restart so a previously applied climate session isn't fired repeatedly.
 import asyncio
 from datetime import datetime, timedelta
 
+from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
+
+MANUAL_COMFORT_MAX = timedelta(minutes=30)
+MANUAL_OFF_RETRY = timedelta(seconds=60)
+MANUAL_OFF_MAX_ATTEMPTS = 3
 
 from .climate_windows import candidate_windows
 
@@ -24,12 +29,74 @@ class ScheduledClimateController:
         self.manual_override = (
             self.entry.options.get("manual_climate_override", False) is True
         )
+        saved_expiry = self.entry.options.get("manual_climate_expires_at")
+        try:
+            self.manual_expires_at = datetime.fromisoformat(saved_expiry)
+            if self.manual_expires_at.tzinfo is None:
+                raise ValueError("Timezone missing")
+        except (TypeError, ValueError):
+            # Previous versions could leave a permanent MANUAL override.
+            # Expire such legacy overrides on next startup tick.
+            self.manual_expires_at = (
+                dt_util.now() if self.manual_override else None
+            )
+        self._manual_off_retry_at = None
+        self._manual_off_attempts = 0
+        self._manual_timer_unsub = None
         self.suppressed_key = self.entry.options.get("climate_suppressed_occurrence")
         self.status = "RECOVERING" if self.active else "IDLE"
         self.message = (
             "Restored scheduled climate session; no duplicate ON sent"
             if self.active else "Ready for scheduled comfort"
         )
+
+    def _arm_manual_expiry(self):
+        """Schedule exact cutoff; periodic 15-second tick is fallback.
+
+        An already-expired session is handled on the next normal tick/restore.
+        The Home Assistant timer is cancelled and replaced on each press.
+        """
+        if self._manual_timer_unsub is not None:
+            self._manual_timer_unsub()
+            self._manual_timer_unsub = None
+        if not self.manual_override:
+            return
+        due = self._manual_off_retry_at or self.manual_expires_at
+        if due is None or due <= dt_util.now():
+            return
+
+        def expire(_now):
+            self._manual_timer_unsub = None
+            self.hass.async_create_task(self.async_tick())
+
+        self._manual_timer_unsub = async_track_point_in_time(
+            self.hass, expire, due
+        )
+
+    async def async_shutdown(self):
+        """Cancel process timer; persisted deadline survives HA restart."""
+        if self._manual_timer_unsub is not None:
+            self._manual_timer_unsub()
+            self._manual_timer_unsub = None
+
+    async def async_manual_result(self, action, success):
+        """Failed ON requests must never leave a permanent manual override."""
+        if action == "off" or success:
+            return
+        async with self._lock:
+            self.manual_override = False
+            self.manual_expires_at = None
+            self._manual_off_retry_at = None
+            self._manual_off_attempts = 0
+            self._arm_manual_expiry()
+            self.status = "ERROR"
+            self.message = (
+                "Manual climate failed; automatic climate scheduling is no longer blocked"
+            )
+            self._persist(
+                manual_climate_override=False,
+                manual_climate_expires_at=None,
+            )
 
     def _persist(self, **changes):
         self.manual._save_options(**changes)
@@ -60,14 +127,25 @@ class ScheduledClimateController:
                 self._mark_finished(self.active["key"])
                 self.active = None
             self.manual_override = action != "off"
+            self.manual_expires_at = (
+                dt_util.now() + MANUAL_COMFORT_MAX
+                if self.manual_override else None
+            )
+            self._manual_off_attempts = 0
+            self._manual_off_retry_at = None
+            self._arm_manual_expiry()
             self.status = "MANUAL" if self.manual_override else "IDLE"
             self.message = (
-                "Manual climate has priority; scheduled climate paused"
+                "Manual climate active; automatic OFF in 30 minutes"
                 if self.manual_override else
                 "Manual climate stopped; future schedules remain enabled"
             )
             self._persist(
                 manual_climate_override=self.manual_override,
+                manual_climate_expires_at=(
+                    self.manual_expires_at.isoformat()
+                    if self.manual_expires_at is not None else None
+                ),
                 climate_suppressed_occurrence=self.suppressed_key,
             )
 
@@ -101,8 +179,68 @@ class ScheduledClimateController:
             available = {c["key"]: c for c in candidates}
 
             if self.manual_override:
+                # Every manual Cool/Warm/Custom starts a fresh absolute
+                # 30-minute limit. The clock survives Home Assistant restarts.
+                if (self.manual_expires_at is None
+                        or now >= self.manual_expires_at):
+                    if (self._manual_off_retry_at is not None
+                            and now < self._manual_off_retry_at):
+                        self._arm_manual_expiry()
+                        return
+                    self._manual_off_retry_at = None
+                    self._manual_off_attempts += 1
+                    # Uses the SAME real Climate + seats OFF service path;
+                    # never calls any Geely charging switch.
+                    off_ok = await self.manual.climate.apply("off")
+                    if off_ok:
+                        self.manual_override = False
+                        self.manual_expires_at = None
+                        self._manual_off_attempts = 0
+                        self._arm_manual_expiry()
+                        self.status = "IDLE"
+                        self.message = (
+                            "Manual comfort automatically switched OFF after 30 minutes; "
+                            "future climate schedules enabled"
+                        )
+                        self._persist(
+                            manual_climate_override=False,
+                            manual_climate_expires_at=None,
+                        )
+                        return
+                    if self._manual_off_attempts >= MANUAL_OFF_MAX_ATTEMPTS:
+                        # Do not leave the scheduling controller locked in
+                        # MANUAL forever, but preserve a visible failure.
+                        self.manual_override = False
+                        self.manual_expires_at = None
+                        self._arm_manual_expiry()
+                        self.status = "ERROR"
+                        self.message = (
+                            "Manual comfort auto-OFF failed three times; "
+                            "inspect Geely vehicle climate directly"
+                        )
+                        self._persist(
+                            manual_climate_override=False,
+                            manual_climate_expires_at=None,
+                            manual_climate_timeout_error=self.message,
+                        )
+                        return
+                    self._manual_off_retry_at = now + MANUAL_OFF_RETRY
+                    self._arm_manual_expiry()
+                    self.status = "ERROR"
+                    self.message = (
+                        f"Manual climate auto-OFF unconfirmed; attempt "
+                        f"{self._manual_off_attempts} of {MANUAL_OFF_MAX_ATTEMPTS}, "
+                        "retrying in one minute"
+                    )
+                    self.manual._notify()
+                    return
+
+                self._arm_manual_expiry() if self._manual_timer_unsub is None else None
                 self.status = "MANUAL"
-                self.message = "Manual climate owns cabin settings"
+                self.message = (
+                    "Manual comfort active until "
+                    f"{self.manual_expires_at.astimezone(now.tzinfo).strftime('%H:%M:%S')}"
+                )
                 self.manual._notify()
                 return
 
