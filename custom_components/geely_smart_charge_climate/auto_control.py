@@ -851,12 +851,12 @@ class AutomaticChargeController:
                     self._update("BLOCKED", "Emergency stop active; starts suppressed")
                 return
 
-            # Preserve a vehicle session already active when HA restarted
-            # if the previous owner record could not be recovered. But do NOT
-            # grant blanket protection to new plug-in charging hours later.
-            # New observed charging must follow the schedule policy, so a
-            # missed morning appointment cannot charge through the afternoon.
-            if (not self.manual.owned and self.stop_watch_until is None
+            # Unknown existing charges are observation-only ONLY when Active
+            # automatic control is not running. Active mode always enforces
+            # the normal schedule (with its 30-second unexpected-charge grace),
+            # even if an old EXTERNAL observation leaked through a reload.
+            if (self.mode != "Active"
+                    and not self.manual.owned and self.stop_watch_until is None
                     and getattr(self.manual, "unmanaged_charge", False)):
                 self.unexpected_since = None
                 self._update(

@@ -7,7 +7,7 @@ from datetime import timedelta
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.util import dt as dt_util
@@ -67,6 +67,7 @@ class GeelyObservedBase(SensorEntity):
         if self._plug:
             entities.append(self._plug)
 
+        @callback
         def changed(event) -> None:
             self.async_write_ha_state()
 
@@ -209,6 +210,7 @@ class GeelySimulationSensor(GeelyObservedBase):
         await super().async_added_to_hass()
         self._learner = RateLearner.from_storage(await self._store.async_load())
 
+        @callback
         def record_change(event) -> None:
             """Record live source changes, not periodic ticks."""
             charging_state = self.hass.states.get(self._switch)
@@ -239,6 +241,7 @@ class GeelySimulationSensor(GeelyObservedBase):
             )
         )
 
+        @callback
         def minute_tick(now) -> None:
             self.async_write_ha_state()
 
@@ -287,6 +290,7 @@ class ClimateNextSessionSensor(SensorEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
 
+        @callback
         def minute_tick(now):
             self.async_write_ha_state()
 
@@ -409,6 +413,7 @@ class AutomaticChargeStatusSensor(SensorEntity):
 
         # Independent read-only Monitor refresh, in addition to the live
         # controller's central timer. Also updates schedule diagnostics.
+        @callback
         def refresh(_now):
             if auto.mode == "Monitor":
                 self.hass.async_create_task(auto.async_tick())
@@ -568,16 +573,28 @@ class VehicleChargingStatusSensor(GeelyObservedBase):
             "automatic_enabled_preference": (
                 self.entry.options.get("automatic_charging_enabled", False) is True
             ),
-            "controller_will_not_stop_unattributed_charge": True,
+            "controller_will_not_stop_unattributed_charge": (
+                runtime.auto.mode != "Active" or runtime.public_mode()
+            ),
+            "unattributed_charge_policy": (
+                "Public mode - vehicle commands suppressed"
+                if runtime.public_mode() else
+                "Automatic schedule - unexpected home charging checked and stopped"
+                if runtime.auto.mode == "Active" else
+                "Automatic charging disabled - observation only"
+            ),
         }
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
         wallbox = self.entry.runtime_data.wallbox_power
         if self.hass.states.get(wallbox) is not None:
+            @callback
+            def wallbox_changed(_event):
+                self.async_write_ha_state()
+
             self.async_on_remove(async_track_state_change_event(
-                self.hass, [wallbox],
-                lambda event: self.async_write_ha_state()
+                self.hass, [wallbox], wallbox_changed
             ))
 
 
