@@ -150,14 +150,18 @@ class LiveChargeController:
                 self._unmanaged_stop_observations = 0
         elif (self.auto.stop_requested_at is None
               and self.auto.stop_watch_until is None
+              and self._startup_observation_until is not None
+              and dt_util.utcnow() <= self._startup_observation_until
               and activity in ("CHARGING", "CHARGING_REPORTED")):
-            # Charging may have started through Geely, a prior HA version or
-            # another user action. Origin cannot be proven from cloud states.
-            # The product must not claim a manual target or command STOP.
+            # ONLY a charge already present during integration startup gets
+            # the legacy/unknown-owner protection. A new charging event hours
+            # later must follow the automatic schedule, including its deadline.
+            # Otherwise plug-in charging outside a valid window runs forever.
             self.unmanaged_charge = True
             self.status = "EXTERNAL"
             self.message = (
-                "Vehicle charging observed; controller ownership unknown"
+                "Charging present during Home Assistant startup; "
+                "previous session ownership unknown"
             )
             self._notify()
 
