@@ -205,6 +205,17 @@ class NotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Target not reached", message)
         self.assertIn("kWh (SoC-based)", message)
 
+    async def test_99_percent_geely_balance_does_not_claim_verified_100(self):
+        self.notifier.charging_ended(
+            automatic=True, session_id="Mon:100",
+            start_soc=41, end_soc=99, target=100, status="COMPLETED",
+            reason="Geely ended its balancing session",
+        )
+        await self.flush()
+        message = self.services.calls[0][2]["message"]
+        self.assertIn("100% target not verified", message)
+        self.assertNotIn("Target reached", message)
+
     async def test_control_toggles_are_pushed_once_only_when_changed(self):
         self.entry.options["automatic_charging_enabled"] = True
         self.entry.options["emergency_stop"] = True
