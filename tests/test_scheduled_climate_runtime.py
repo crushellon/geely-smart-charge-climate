@@ -293,12 +293,20 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("inspect Geely", self.controller.message)
         self.assertFalse(self.entry.options["manual_climate_override"])
 
-    async def test_failed_manual_on_does_not_leave_permanent_override(self):
+    async def test_unconfirmed_manual_on_keeps_auto_off_to_prevent_delayed_cloud_start(self):
         await self.controller.async_manual_override("Cool")
+        deadline = self.controller.manual_expires_at
         await self.controller.async_manual_result("Cool", False)
-        self.assertFalse(self.controller.manual_override)
-        self.assertIsNone(self.entry.options["manual_climate_expires_at"])
+        self.assertTrue(self.controller.manual_override)
+        self.assertEqual(self.controller.manual_expires_at, deadline)
         self.assertEqual(self.controller.status, "ERROR")
+        self.assertIn("OFF remains armed", self.controller.message)
+        # The Geely command may take effect even after its API call errors.
+        # An OFF still goes out at the original 30-minute deadline.
+        clock["now"] = deadline
+        await self.controller.async_tick()
+        self.assertEqual(self.climate.calls, [("manual_off", None)])
+        self.assertFalse(self.controller.manual_override)
 
     async def test_normal_future_schedules_continue_after_manual_expiry(self):
         start = clock["now"]
