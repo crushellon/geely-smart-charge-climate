@@ -784,9 +784,9 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(self.auto.stop_requested_at)
 
     async def test_existing_charge_without_owner_is_not_stopped_by_schedule(self):
-        # The car may already be charging from Geely/manual before an update.
-        # The finished product cannot treat the absence of a saved owner as
-        # evidence that its own START was unauthorised.
+        # Pre-existing charge encountered DURING startup is protected. New
+        # plug-in charges later are subject to the live schedule's deadlines.
+        self.manual.unmanaged_charge = True
         self.entry.options["weekly_schedule"] = {}
         self.values["switch.car"] = "on"
         self.values["sensor.power"] = "6"
