@@ -93,6 +93,7 @@ class DummyScheduledClimate:
         self.status = "IDLE"
         self.message = "No schedule"
         self.active = None
+        self.manual_expires_at = None
         self.events = []
 
     async def async_tick(self):
