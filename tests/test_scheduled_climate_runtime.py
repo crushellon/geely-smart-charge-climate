@@ -298,7 +298,7 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         # A different, later appointment is allowed to activate.
         options = slots.update_slot(self.entry.options, 2, "enabled", True)
         options = slots.update_slot(options, 2, "day", "Sunday")
-        options = slots.update_slot(options, 2, "ready_time", "00:45")
+        options = slots.update_slot(options, 2, "ready_time", "00:25")
         self.entry.options = options
         await self.controller.async_tick()
         self.assertEqual(
