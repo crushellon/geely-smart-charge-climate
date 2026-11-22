@@ -684,6 +684,16 @@ class AutomaticChargeController:
                             "100% ready-by deadline passed without confirmed prior charging"
                         )
                         return
+                    if (self.manual.plug
+                            and self._raw(self.manual.plug) == "off"
+                            and not self._confirmed_charge_power()):
+                        # A valid 100% charge may finish late, but only while
+                        # the same physical session remains connected. Never
+                        # carry a morning owner across an unplug/replug.
+                        await self._request_stop(
+                            "100% session disconnected after ready-by; expired"
+                        )
+                        return
                 if self._recovery_started_at is not None:
                     # Cloud switch telemetry often lags actual wallbox power.
                     # Hold the previous ownership for a bounded grace period
