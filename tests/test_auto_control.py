@@ -125,6 +125,10 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.auto.async_tick()
         self.assertEqual(self.auto.status, "STOPPED")
         self.assertFalse(self.auto.owned)
+        self.assertEqual(
+            self.auto.finished_deadlines[("monday", "2026-11-23")]["outcome"],
+            "expired",
+        )
 
     async def test_old_morning_charge_cannot_restart_on_afternoon_plug(self):
         global now
