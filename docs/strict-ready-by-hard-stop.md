@@ -18,8 +18,9 @@ bypassed the automatic policy's outside-window STOP.
   The 15-minute planning buffer starts charging slightly early; it does
   not extend charging beyond the ready-by time.
 - **100%:** Geely terminates and balances an *already actively charging*
-  scheduled session. Only positive vehicle/wallbox power **observed before
-  its ready-by deadline** grants that exception. The allowance is saved
+  scheduled session. Positive vehicle/wallbox power **observed before
+  its ready-by deadline** grants that exception; on sensor-less installations,
+  Geely's ON state is the available evidence. The allowance is saved
   across an HA restart. A 100% session with no evidence of genuine
   pre-deadline charging is cancelled at the deadline. Once unplugged after
   the deadline with no power, the old 100% session is cancelled; plugging
