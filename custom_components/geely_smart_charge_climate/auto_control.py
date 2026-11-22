@@ -110,8 +110,14 @@ class AutomaticChargeController:
         power = self._power()
         wallbox = (self.manual._wallbox_kw()
                    if hasattr(self.manual, "_wallbox_kw") else None)
-        return ((power is not None and power > 0.25)
-                or (wallbox is not None and wallbox > 0.25))
+        if ((power is not None and power > 0.25)
+                or (wallbox is not None and wallbox > 0.25)):
+            return True
+        # Preserve Geely-only installations without a power sensor.
+        # A reported ON is the best available active-session evidence there,
+        # but never prefer it over a configured sensor actually reporting 0.
+        return (not self.manual.charging_power and wallbox is None
+                and self._raw(self.manual.charging_switch) == "on")
 
     def _charging(self):
         state = self._raw(self.manual.charging_switch)
