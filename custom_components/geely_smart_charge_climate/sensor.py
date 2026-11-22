@@ -437,11 +437,24 @@ class ManualClimateStatusSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self):
+        scheduler = self.entry.runtime_data.scheduled_climate
+        expires = scheduler.manual_expires_at
+        remaining = (
+            max(0, round((expires - dt_util.now()).total_seconds()))
+            if scheduler.manual_override and expires is not None else None
+        )
         return {
             "message": self.entry.runtime_data.climate.message,
             "manual_only": True,
-            "scheduled_climate_active": (
-                self.entry.runtime_data.scheduled_climate.active is not None
+            "manual_comfort_active": scheduler.manual_override,
+            "auto_off_after_minutes": 30,
+            "manual_comfort_expires_at": (
+                expires.isoformat() if scheduler.manual_override and expires else None
+            ),
+            "manual_comfort_seconds_remaining": remaining,
+            "scheduled_climate_active": scheduler.active is not None,
+            "manual_comfort_timeout_error": self.entry.options.get(
+                "manual_climate_timeout_error"
             ),
         }
 
