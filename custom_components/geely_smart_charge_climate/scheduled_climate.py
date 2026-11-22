@@ -80,23 +80,21 @@ class ScheduledClimateController:
             self._manual_timer_unsub = None
 
     async def async_manual_result(self, action, success):
-        """Failed ON requests must never leave a permanent manual override."""
+        """Keep auto-OFF even when Geely cloud did not acknowledge manual ON.
+
+        A failed service request can still reach the car asynchronously.
+        Immediately clearing the timer on failure could then leave cabin
+        climate on indefinitely. The existing 30-minute expiry stays armed.
+        """
         if action == "off" or success:
             return
         async with self._lock:
-            self.manual_override = False
-            self.manual_expires_at = None
-            self._manual_off_retry_at = None
-            self._manual_off_attempts = 0
-            self._arm_manual_expiry()
             self.status = "ERROR"
             self.message = (
-                "Manual climate failed; automatic climate scheduling is no longer blocked"
+                "Manual comfort command unconfirmed by Geely; "
+                "automatic 30-minute OFF remains armed"
             )
-            self._persist(
-                manual_climate_override=False,
-                manual_climate_expires_at=None,
-            )
+            self.manual._notify()
 
     def _persist(self, **changes):
         self.manual._save_options(**changes)
