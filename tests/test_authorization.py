@@ -53,6 +53,29 @@ class AuthorizationTests(unittest.TestCase):
             now=self.now + timedelta(hours=7))))
         self.assertNotEqual(waiting.action, "START")
 
+    def test_ready_by_is_exclusive_even_with_large_shortfall(self):
+        ready = datetime(2026, 11, 23, 9, 30,
+                         tzinfo=ZoneInfo("Australia/Brisbane"))
+        for target in (80, 100):
+            with self.subTest(target=target):
+                schedule = {"monday": {
+                    "enabled": True, "target": target, "ready_time": "09:30",
+                }}
+                # An earlier calculated start must never reopen the session
+                # at or after the requested vehicle-ready deadline.
+                at_cutoff = auth.decide(**(self.params | {
+                    "schedule": schedule, "soc": 10,
+                    "charging": False, "now": ready,
+                }))
+                evening = auth.decide(**(self.params | {
+                    "schedule": schedule, "soc": 10,
+                    "charging": False,
+                    "now": ready + timedelta(hours=9),
+                }))
+                self.assertNotEqual(at_cutoff.action, "START")
+                self.assertNotEqual(evening.action, "START")
+                self.assertNotEqual(at_cutoff.ready_by, ready)
+
     def test_never_control_public_or_unverified_plug(self):
         for extra in (
             {"plugged": None}, {"public_mode": True}, {"emergency": True},
