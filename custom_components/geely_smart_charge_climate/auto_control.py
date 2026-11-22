@@ -49,7 +49,9 @@ class AutomaticChargeController:
         self.owned_target = None
         self.owned_day = None
         self.owned_deadline = None
+        self.session_start_soc = None
         self.started_at = None
+        self.session_start_soc = None
         self.saw_charging = False
         # Only a 100% session with positive charging evidence BEFORE its
         # ready-by deadline may continue beyond it for Geely-managed balancing.
@@ -73,6 +75,7 @@ class AutomaticChargeController:
         self._recovery_started_at = None
         self._lock = asyncio.Lock()
         self._last_notification = None
+        self._last_release_owned = False
 
     def _raw(self, name):
         return self.manual._raw(name)
@@ -172,6 +175,22 @@ class AutomaticChargeController:
             return
         self._last_notification = event
         self.last_event = message
+        # Keep the old Home Assistant notification and event bus for History;
+        # push actionable failures/warnings to the iPhone separately.
+        if (hasattr(self.manual, "push")
+                and (code in ("error", "unexpected", "interrupted")
+                     or (code == "stop_requested" and self.stop_attempts == 1)
+                     or (code == "stop_verified" and not self._last_release_owned))):
+            self.manual.push.emit(
+                f"auto:alert:{code}:{message}:{self.owned_deadline}",
+                "Geely charging stop verified" if code == "stop_verified"
+                else "Geely charging warning" if code != "stop_requested"
+                else "Geely charging stop requested",
+                (f"{message}. " +
+                 ("Charging OFF has not yet been verified."
+                  if code in ("stop_requested", "error") else
+                  "Check the actual vehicle charging state.")),
+            )
         try:
             persistent_notification.async_create(
                 self.hass,
@@ -263,7 +282,11 @@ class AutomaticChargeController:
             {"active": True, "target": self.owned_target,
              "day": self.owned_day, "deadline": self.owned_deadline.isoformat(),
              "stop_pending": self.stop_requested_at is not None,
-             "full_overrun_authorized": self.full_overrun_authorized}
+             "full_overrun_authorized": self.full_overrun_authorized,
+             "start_soc": self.session_start_soc,
+             "started_at": (
+                 self.started_at.isoformat() if self.started_at else None
+             )}
             if active and self.owned_deadline else {"active": False}
         )
         if hasattr(self.manual, "_save_options"):
@@ -306,10 +329,14 @@ class AutomaticChargeController:
         self.owned_target = target
         self.owned_day = day
         self.owned_deadline = deadline
+        self.session_start_soc = saved.get("start_soc")
         self.full_overrun_authorized = (
             saved.get("full_overrun_authorized") is True and target == 100
         )
-        self.started_at = dt_util.utcnow()
+        try:
+            self.started_at = datetime.fromisoformat(saved["started_at"])
+        except (KeyError, TypeError, ValueError):
+            self.started_at = dt_util.utcnow()
         if saved.get("stop_pending") is True:
             # Persisted explicit STOP survives reload. Never send START.
             self.stop_requested_at = dt_util.utcnow()
@@ -436,6 +463,7 @@ class AutomaticChargeController:
         self.owned_target = plan.target
         self.owned_day = plan.day
         self.owned_deadline = plan.ready_by
+        self.session_start_soc = self._soc()
         self.started_at = dt_util.utcnow()
         self._recovery_started_at = None
         self.full_overrun_authorized = False
@@ -466,6 +494,7 @@ class AutomaticChargeController:
             self._release("BLOCKED", "Public mode enabled; stop command suppressed")
             return
         if self.stop_requested_at is None:
+            self._last_release_owned = False
             self.stop_attempts = 0
             self.stop_context = reason
             self.stop_started_at = dt_util.utcnow()
@@ -490,7 +519,17 @@ class AutomaticChargeController:
             self._notice("error", "Automatic stop failed; verify charging directly")
 
     def _release(self, state, message):
+        self._last_release_owned = self.owned
         if self.owned and self.owned_day and self.owned_deadline:
+            if hasattr(self.manual, "push"):
+                self.manual.push.charging_ended(
+                    automatic=True,
+                    session_id=self.owned_deadline.isoformat(),
+                    start_soc=self.session_start_soc,
+                    end_soc=self._soc(), target=self.owned_target,
+                    status=state, reason=message,
+                    ready_by=self.owned_deadline,
+                )
             soc = self._soc()
             reached_target = (
                 state == "COMPLETED"
@@ -878,6 +917,7 @@ class AutomaticChargeController:
                     self.owned_target = policy.target
                     self.owned_day = policy.day
                     self.owned_deadline = policy.ready_by
+                    self.session_start_soc = self._soc()
                     self.started_at = dt_util.utcnow()
                     self.saw_charging = True
                     self.full_overrun_authorized = (

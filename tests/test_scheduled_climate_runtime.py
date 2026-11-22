@@ -53,6 +53,7 @@ Controller = env["ScheduledClimateController"]
 
 class FakeCabin:
     def __init__(self):
+        self.entities = {"climate": "climate.car"}
         self.calls = []
         self.succeed = True
         self.manual_off_succeeds = True
@@ -70,6 +71,18 @@ class FakeCabin:
         return True
 
 
+class FakePush:
+    def __init__(self):
+        self.events = []
+
+    def climate_event(self, **details):
+        self.events.append(("climate", details))
+
+    def emit(self, key, title, message):
+        self.events.append(("push", key, title, message))
+        return True
+
+
 class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         clock["now"] = datetime(2026, 11, 21, 23, 50,
@@ -77,12 +90,13 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         alarm_events.clear()
         self.entry = SimpleNamespace(options={"scheduled_climate_enabled": True})
         self.climate = FakeCabin()
+        self.push = FakePush()
         self.messages = []
         self.manual = SimpleNamespace(
             entry=self.entry, hass=SimpleNamespace(
                 async_create_task=asyncio.create_task
             ),
-            climate=self.climate,
+            climate=self.climate, push=self.push,
             _save_options=lambda **vals: self.entry.options.update(vals),
             _raw=lambda entity: "off",
             public_mode=lambda: False,
@@ -116,6 +130,36 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([x[0] for x in self.climate.calls], ["on", "off"])
         await self.controller.async_tick()
         self.assertEqual(self.controller.status, "DISABLED")
+
+    async def test_scheduled_climate_pushes_once_on_start_and_stop(self):
+        self.configure_independent()
+        await self.controller.async_tick()
+        climate_events = [v[1] for v in self.push.events if v[0] == "climate"]
+        self.assertEqual(len(climate_events), 1)
+        self.assertEqual(climate_events[0]["action"], "on")
+        self.assertEqual(climate_events[0]["kind"], "independent")
+        self.assertEqual(climate_events[0]["setting"]["temperature"], 22)
+        await self.controller.async_tick()
+        self.assertEqual(len([
+            v for v in self.push.events if v[0] == "climate"
+        ]), 1)
+        clock["now"] += timedelta(minutes=36)
+        await self.controller.async_tick()
+        climate_events = [v[1] for v in self.push.events if v[0] == "climate"]
+        self.assertEqual([v["action"] for v in climate_events], ["on", "off"])
+        self.assertTrue(climate_events[1]["success"])
+
+    async def test_manual_30_minute_auto_off_generates_phone_push(self):
+        await self.controller.async_manual_override("Cool")
+        clock["now"] += timedelta(minutes=30)
+        await self.controller.async_tick()
+        notices = [event for event in self.push.events if event[0] == "push"]
+        self.assertEqual(len(notices), 1)
+        self.assertIn("timed out", notices[0][2])
+        await self.controller.async_tick()
+        self.assertEqual(len([
+            event for event in self.push.events if event[0] == "push"
+        ]), 1)
 
     async def test_independent_start_once_and_stop_after_hold(self):
         self.configure_independent()

@@ -20,7 +20,7 @@ class DiscoveryStaticTests(unittest.TestCase):
         for file in ROOT.glob("*.py"):
             # Device commands belong only to explicit charging/climate
             # controllers, never to observers, schedules or dashboards.
-            if file.name in ("live_control.py", "auto_control.py", "manual_climate.py"):
+            if file.name in ("live_control.py", "auto_control.py", "manual_climate.py", "push_notifications.py"):
                 continue
             source = file.read_text(encoding="utf-8")
             self.assertNotIn("hass.services.async_call", source)

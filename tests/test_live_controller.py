@@ -30,6 +30,28 @@ activity_spec.loader.exec_module(activity)
 tree = ast.parse((ROOT / "live_control.py").read_text(encoding="utf-8"))
 body = next(node for node in tree.body
             if isinstance(node, ast.ClassDef) and node.name == "LiveChargeController")
+class DummyPush:
+    def __init__(self, runtime):
+        self.events = []
+
+    def observe_charging(self):
+        return None
+
+    def emit(self, key, title, message):
+        self.events.append((key, title, message))
+        return True
+
+    def charging_ended(self, **details):
+        self.events.append(("ended", details))
+
+    def check_control_changes(self):
+        return None
+
+
+def fake_fresh_event_id(key):
+    return key
+
+
 class DummyAutomatic:
     def __init__(self, manual):
         self.manual = manual
@@ -71,6 +93,7 @@ class DummyScheduledClimate:
         self.status = "IDLE"
         self.message = "No schedule"
         self.active = None
+        self.manual_expires_at = None
         self.events = []
 
     async def async_tick(self):
@@ -90,6 +113,7 @@ class DummyClimate:
     def __init__(self, hass, entry, notify):
         self.status = "IDLE"
         self.message = "No commands sent"
+        self.entities = {"climate": "climate.car"}
 
     async def apply(self, action):
         self.status = action
@@ -99,6 +123,8 @@ class DummyClimate:
 env = {
     "AutomaticChargeController": DummyAutomatic,
     "ManualClimateController": DummyClimate,
+    "VehiclePushNotifications": DummyPush,
+    "fresh_event_id": fake_fresh_event_id,
     "ScheduledClimateController": DummyScheduledClimate,
     "vehicle_activity": activity.vehicle_activity,
     "MANUAL_STOP_SETTLE": timedelta(0),

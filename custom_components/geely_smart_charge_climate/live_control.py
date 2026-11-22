@@ -20,6 +20,7 @@ from .auto_control import AutomaticChargeController
 from .manual_climate import ManualClimateController
 from .scheduled_climate import ScheduledClimateController
 from .vehicle_activity import vehicle_activity
+from .push_notifications import VehiclePushNotifications, fresh_event_id
 from .live_safety import (
     EMERGENCY_STOP, LEGACY_ACTIVE, LEGACY_CONTROLLER, OLD_FULL_CHARGE,
     PUBLIC_MODE, start_preflight, should_stop_owned_session,
@@ -63,6 +64,7 @@ class LiveChargeController:
         # existing charge is unauthorised before restart telemetry settles.
         self._startup_observation_until = None
         self.active_target = None
+        self.session_start_soc = None
         self.started_at = None
         self._manual_recovery_started = None
         self.observed_active = False
@@ -80,6 +82,7 @@ class LiveChargeController:
         self.auto = AutomaticChargeController(self)
         self.climate = ManualClimateController(hass, entry, self._notify)
         self.scheduled_climate = ScheduledClimateController(self)
+        self.push = VehiclePushNotifications(self)
         self._manual_recovery_started = None
 
     def listen(self, callback_fn):
@@ -92,6 +95,10 @@ class LiveChargeController:
 
     @callback
     def _notify(self):
+        # Observe real vehicle feedback; the push dispatcher deduplicates
+        # events and never confuses a service request with actual power.
+        if hasattr(self, "push"):
+            self.push.observe_charging()
         for fn in tuple(self._callbacks):
             fn()
 
@@ -210,6 +217,7 @@ class LiveChargeController:
     def _remember_manual_session(self, active):
         self._save_options(manual_session=(
             {"active": True, "target": self.active_target,
+             "start_soc": self.session_start_soc,
              "started_at": self.started_at.isoformat() if self.started_at else None}
             if active else {"active": False}
         ))
@@ -250,6 +258,7 @@ class LiveChargeController:
                     and 50 <= target <= 100):
                 self.owned = True
                 self.active_target = int(target)
+                self.session_start_soc = saved.get("start_soc")
                 try:
                     self.started_at = datetime.fromisoformat(saved["started_at"])
                 except (KeyError, TypeError, ValueError):
@@ -297,6 +306,7 @@ class LiveChargeController:
             self.hass.async_create_task(self.scheduled_climate.async_tick())
 
         async def options_changed(_hass, _entry):
+            self.push.check_control_changes()
             await self.async_reconcile_automatic()
             await self.scheduled_climate.async_tick()
             self._notify()
@@ -369,6 +379,10 @@ class LiveChargeController:
             self.status = "BLOCKED"
             self.message = "Stop the active schedule and verify OFF before manual charging"
             self._notify()
+            self.push.emit(
+                fresh_event_id("manual-start-blocked-owned-auto"),
+                "Geely manual charge blocked", self.message,
+            )
             return
         if self.unmanaged_charge or self._vehicle_indicates_charging():
             self.status = "BLOCKED"
@@ -377,6 +391,10 @@ class LiveChargeController:
                 "before starting a new charge"
             )
             self._notify()
+            self.push.emit(
+                fresh_event_id("manual-start-blocked-observed"),
+                "Geely manual charge blocked", self.message,
+            )
             return
         if self.auto.mode != "Off":
             await self.auto.async_set_mode("Off")
@@ -384,6 +402,11 @@ class LiveChargeController:
             await self.async_set_target(target)
         await self.async_start()
         if not self.owned:
+            self.push.emit(
+                fresh_event_id("manual-start-blocked"),
+                "Geely manual charge not started",
+                f"{self.message}. No charging START confirmed.",
+            )
             await self.async_reconcile_automatic()
             self._notify()
 
@@ -394,23 +417,76 @@ class LiveChargeController:
             self.climate.status = "BLOCKED"
             self.climate.message = "Release Emergency Stop before activating cabin climate"
             self._notify()
+            self.push.emit(
+                fresh_event_id("climate-blocked-emergency"),
+                "Geely comfort blocked",
+                "Comfort activation blocked by Emergency STOP.",
+            )
             return
         await self.scheduled_climate.async_manual_override(action)
         # The existing user button is the only ON path. A failed Geely call
         # must not leave the schedule in MANUAL indefinitely.
         success = await self.climate.apply(action)
         await self.scheduled_climate.async_manual_result(action, success)
+        climate_entity = self.climate.entities.get("climate")
+        reported = self._raw(climate_entity)
+        expiry = self.scheduled_climate.manual_expires_at
+        duration = (
+            f" Auto-OFF by {dt_util.as_local(expiry).strftime('%I:%M %p')}."
+            if action != "off" and expiry is not None else ""
+        )
+        status = (
+            "Vehicle reports climate ON" if reported not in (
+                None, "off", "unknown", "unavailable"
+            ) and action != "off" else
+            "Vehicle reports climate OFF" if reported == "off" and action == "off"
+            else "Vehicle report pending"
+        )
+        label = {
+            "Cool": "Comfort Cool", "Warm": "Comfort Warm",
+            "custom": "Custom cabin temperature", "off": "Climate and seats OFF",
+        }.get(action, action)
+        options = self.entry.options
+        details = ""
+        if action in ("Cool", "Warm"):
+            profile = options.get(action.lower(), {})
+            details = (
+                f" Target {profile.get('temperature', 'configured')}°C;"
+                f" driver {profile.get('driver', 'configured')};"
+                f" passenger {profile.get('passenger', 'configured')};"
+                f" steering heat {'ON' if profile.get('steering_heat') else 'OFF'}."
+            )
+        elif action == "custom":
+            details = (
+                f" Target {options.get('manual_cabin_temperature', 22)}°C."
+            )
+        self.push.emit(
+            fresh_event_id(f"manual-climate-{action}"),
+            f"Geely {label}",
+            (f"{label}: {'command accepted' if success else 'command unconfirmed'}."
+             f" {status}.{details}{duration}"),
+        )
 
     async def async_resume_schedule(self):
         """Deliberate return from manual charging to automatic scheduling."""
         if self.owned or self.stop_requested_at is not None:
             self.message = "Stop manual charging and wait for verification first"
             self._notify()
+            self.push.emit(
+                fresh_event_id("resume-blocked-manual"),
+                "Geely schedule resume blocked", self.message,
+            )
             return
         await self.async_set_automatic_enabled(True)
         if self.auto.mode == "Active":
             await self.auto.async_request_resume()
         self._notify()
+        self.push.emit(
+            fresh_event_id("resume-schedule"),
+            "Geely automatic schedule resumed",
+            "Automatic schedule enabled. Charging will begin only when the "
+            "vehicle meets the actual scheduled start and safety conditions.",
+        )
 
     async def async_start(self):
         async with self._lock:
@@ -449,6 +525,7 @@ class LiveChargeController:
                 self.unmanaged_charge = False
             self.stop_watch_until = None
             self.active_target = self.target
+            self.session_start_soc = self._raw(self.battery)
             self.started_at = dt_util.utcnow()
             self._remember_manual_session(True)
             # This authorised manual charge supersedes any stale automatic
@@ -502,6 +579,7 @@ class LiveChargeController:
         self._save_options(manual_session={
             "active": True,
             "target": self.active_target,
+            "start_soc": self.session_start_soc,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "stop_pending": True,
         })
@@ -519,16 +597,29 @@ class LiveChargeController:
             self.status = "ERROR"
             self.message = f"Stop service error: {type(exc).__name__}; verify in car"
             self._notify()
+            self.push.emit(
+                f"manual:stop-service-error:{self.started_at}:{self.stop_attempts}",
+                "Geely manual STOP error",
+                "Geely stop request failed; the car may still be charging. "
+                "Check charging power and stop directly in the vehicle if needed.",
+            )
             return  # Keep ownership and allow another explicit stop.
 
     def _finish(self, status, message):
         """Finish only after vehicle state indicates charging has stopped."""
+        if self.started_at is not None:
+            self.push.charging_ended(
+                automatic=False, session_id=self.started_at.isoformat(),
+                start_soc=self.session_start_soc, end_soc=self._raw(self.battery),
+                target=self.active_target, status=status, reason=message,
+            )
         if (status == "STOPPED" and self.stop_started_at is not None
                 and self.stop_watch_until is None):
             self.stop_watch_until = dt_util.utcnow() + MANUAL_STOP_WATCH
         self.owned = False
         self.armed = False
         self.active_target = None
+        self.session_start_soc = None
         self.started_at = None
         self.observed_active = False
         self.stop_requested_at = None
@@ -587,11 +678,25 @@ class LiveChargeController:
         if self.owned:
             async with self._lock:
                 await self._stop_locked("User requested manual stop")
+            requested = self.stop_requested_at is not None
+            self.push.emit(
+                fresh_event_id("manual-stop-requested"),
+                "Geely manual charging STOP requested" if requested
+                else "Geely manual STOP blocked",
+                "STOP request issued; waiting for charging OFF/zero power."
+                if requested else
+                "Public charging mode prevented a vehicle STOP command.",
+            )
             return
         if self.public_mode():
             self.status = "BLOCKED"
             self.message = "Public charging mode: use Geely to stop public charging"
             self._notify()
+            self.push.emit(
+                fresh_event_id("manual-stop-public-block"),
+                "Geely manual STOP blocked",
+                "Public Charging Mode is ON; stop directly in Geely.",
+            )
             return
         if self._vehicle_indicates_charging() or self.unmanaged_charge:
             # Use the automatic safety controller's already hardened STOP
@@ -604,10 +709,19 @@ class LiveChargeController:
             self.status = "STOP_REQUESTED"
             self.message = "Stopping observed charge; waiting for Geely verification"
             self._notify()
+            self.push.emit(
+                fresh_event_id("manual-stop-observed"),
+                "Geely observed charging STOP requested",
+                "Stopping the existing home charge; awaiting verified OFF/zero power.",
+            )
             return
         self.status = "IDLE"
         self.message = "No charge detected to stop"
         self._notify()
+        self.push.emit(
+            fresh_event_id("manual-stop-not-charging"),
+            "Geely manual STOP", "No active charging detected; no stop was needed."
+        )
 
     async def async_tick(self):
         """Observe manual ownership and verify stops; never blind-start."""
@@ -659,6 +773,12 @@ class LiveChargeController:
                         self.status = "ERROR"
                         self.message = "Stop unconfirmed after 3 attempts: verify in car"
                         self._notify()
+                        self.push.emit(
+                            f"manual:stop-unconfirmed:{self.started_at}",
+                            "Geely manual STOP unconfirmed",
+                            "Home Assistant could not verify the vehicle stopped "
+                            "after three tries. Check charging power immediately.",
+                        )
                 return
 
             if (self.entry.options.get("emergency_stop", False) is True
