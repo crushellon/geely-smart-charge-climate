@@ -75,6 +75,7 @@ class AutomaticChargeController:
         self._recovery_started_at = None
         self._lock = asyncio.Lock()
         self._last_notification = None
+        self._last_release_owned = False
 
     def _raw(self, name):
         return self.manual._raw(name)
@@ -176,12 +177,14 @@ class AutomaticChargeController:
         self.last_event = message
         # Keep the old Home Assistant notification and event bus for History;
         # push actionable failures/warnings to the iPhone separately.
-        if hasattr(self.manual, "push") and code in (
-            "error", "unexpected", "interrupted", "stop_requested",
-        ):
+        if (hasattr(self.manual, "push")
+                and (code in ("error", "unexpected", "interrupted")
+                     or (code == "stop_requested" and self.stop_attempts == 1)
+                     or (code == "stop_verified" and not self._last_release_owned))):
             self.manual.push.emit(
                 f"auto:alert:{code}:{message}:{self.owned_deadline}",
-                "Geely charging warning" if code != "stop_requested"
+                "Geely charging stop verified" if code == "stop_verified"
+                else "Geely charging warning" if code != "stop_requested"
                 else "Geely charging stop requested",
                 (f"{message}. " +
                  ("Charging OFF has not yet been verified."
@@ -491,6 +494,7 @@ class AutomaticChargeController:
             self._release("BLOCKED", "Public mode enabled; stop command suppressed")
             return
         if self.stop_requested_at is None:
+            self._last_release_owned = False
             self.stop_attempts = 0
             self.stop_context = reason
             self.stop_started_at = dt_util.utcnow()
@@ -515,6 +519,7 @@ class AutomaticChargeController:
             self._notice("error", "Automatic stop failed; verify charging directly")
 
     def _release(self, state, message):
+        self._last_release_owned = self.owned
         if self.owned and self.owned_day and self.owned_deadline:
             if hasattr(self.manual, "push"):
                 self.manual.push.charging_ended(
