@@ -65,6 +65,15 @@ In **Scheduled climate status**, a manual command reports `MANUAL`;
 when its 30-minute timer expires, the override should clear so next
 week's/day's planned comfort can run.
 
+## Driving precaution
+
+This version does **not yet know whether the vehicle is moving**. An
+automatic remote climate OFF request could potentially affect cabin HVAC
+while you are driving. First validate auto-OFF **with the EX5 parked**,
+and confirm whether the vehicle's own climate controls take precedence
+once driving. Do not rely on remote HVAC during a journey for windscreen
+demisting or other visibility-critical functions.
+
 ## Supervised physical acceptance
 
 1. Install **v0.3.15** through HACS and restart Home Assistant **only when
