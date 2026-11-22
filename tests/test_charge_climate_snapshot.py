@@ -46,6 +46,23 @@ class LinkedComfortSnapshotTests(unittest.TestCase):
         self.assertEqual(updated["hold_minutes"], 23)
         self.assertFalse(updated["commands_enabled"])
 
+    def test_monday_linked_enabled_independent_off_still_actionable(self):
+        options = {
+            "automatic_charging_enabled": True,
+            "scheduled_climate_enabled": False,
+            "weekly_schedule": {
+                "monday": {
+                    "enabled": True, "target": 100, "ready_time": "07:00"
+                },
+            },
+        }
+        options = linked.set_value(options, "monday", "enabled", True)
+        data = linked.snapshot(options, "monday")
+        self.assertTrue(data["enabled"])
+        self.assertTrue(data["commands_enabled"])
+        options["automatic_charging_enabled"] = False
+        self.assertFalse(linked.snapshot(options, "monday")["commands_enabled"])
+
     def test_enabled_schedule_uses_own_day_comfort_profile(self):
         options = linked.set_value({}, "monday", "enabled", True)
         options = linked.set_value(options, "monday", "profile", "Cool")

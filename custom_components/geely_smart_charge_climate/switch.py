@@ -247,14 +247,15 @@ class EmergencyStopSwitch(SwitchEntity):
 
 
 class ScheduledClimateEnabledSwitch(SwitchEntity):
-    """Production climate scheduling opt-in; no silent activation on migration.
+    """Enable only seven independent cabin appointments, not linked comfort.
 
-    Slots previously configured for simulation remain inert until this
-    persistent global switch is enabled intentionally.
+    Previously simulated independent slots remain inert on migration until
+    the user enables them. Charging-linked Cool/Warm is controlled on its
+    own ready-by weekday in EV Control.
     """
 
     _attr_has_entity_name = True
-    _attr_name = "Scheduled climate enabled"
+    _attr_name = "Independent climate schedules enabled"
     _attr_icon = "mdi:calendar-clock"
 
     def __init__(self, hass, entry):

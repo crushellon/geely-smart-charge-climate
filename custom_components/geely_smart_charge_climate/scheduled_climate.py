@@ -78,13 +78,26 @@ class ScheduledClimateController:
                 self.entry.options.get("emergency_stop", False) is True
                 or self.manual._raw("input_boolean.ev_emergency_stop") == "on"
             )
-            enabled = self.entry.options.get("scheduled_climate_enabled", False) is True
+            # The Climate Scheduler master switch belongs ONLY to the
+            # independent appointments on that tab. Charging-linked comfort
+            # belongs to its charging day and has its own enabled switch.
+            # Previously this master suppressed both types and silently
+            # disabled Monday's enabled Cool/Warm departure comfort.
+            independent_enabled = (
+                self.entry.options.get("scheduled_climate_enabled", False) is True
+            )
             candidates = (
                 candidate_windows(now, self.entry.options)
-                if enabled and not emergency else []
+                if not emergency else []
             )
+            if not independent_enabled:
+                candidates = [
+                    c for c in candidates if c["kind"] != "independent"
+                ]
             if self.manual.public_mode():
-                candidates = [c for c in candidates if c["kind"] != "linked"]
+                candidates = [
+                    c for c in candidates if c["kind"] != "linked"
+                ]
             available = {c["key"]: c for c in candidates}
 
             if self.manual_override:
@@ -170,9 +183,29 @@ class ScheduledClimateController:
                 self.message = "Emergency interlock; climate schedules suppressed"
                 self.manual._notify()
                 return
-            if not enabled:
-                self.status = "DISABLED"
-                self.message = "Scheduled climate disabled; enable it to run saved slots"
+            if not independent_enabled and not candidates:
+                # The independent scheduler is disabled, but do not imply
+                # Monday's linked comfort is disabled: it has its own switch.
+                linked_settings = self.entry.options.get(
+                    "charging_linked_comfort", {}
+                )
+                charge_days = self.entry.options.get("weekly_schedule", {})
+                linked_configured = (
+                    self.entry.options.get("automatic_charging_enabled") is True
+                    and not self.manual.public_mode()
+                    and any(
+                        isinstance(config, dict)
+                        and config.get("enabled") is True
+                        and charge_days.get(day, {}).get("enabled") is True
+                        for day, config in linked_settings.items()
+                    )
+                )
+                self.status = "WAITING" if linked_configured else "DISABLED"
+                self.message = (
+                    "Independent appointments off; awaiting charging-linked comfort"
+                    if linked_configured else
+                    "Independent climate appointments disabled"
+                )
                 self.manual._notify()
                 return
 

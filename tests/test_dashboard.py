@@ -138,6 +138,18 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("select.cool_driver_seat_mode", str(cards[1]))
         self.assertIn("select.warm_passenger_seat_mode", str(cards[3]))
 
+    def test_independent_master_label_excludes_charging_linked_comfort(self):
+        climate = self.config["views"][2]["sections"][0]["cards"]
+        current = next(c for c in climate if c.get("title") == "Current climate status")
+        self.assertEqual(current["entities"][0]["name"],
+                         "Independent climate schedules enabled")
+        self.assertIn(
+            "Charging-linked Cool/Warm is enabled separately",
+            json.dumps(climate)
+        )
+        ev = self.right()[0]
+        self.assertIn("switch.monday_linked_comfort_enabled", str(ev))
+
     def test_seven_independent_climate_slots_retained(self):
         all_cards = sum(
             (section["cards"] for section in self.config["views"][2]["sections"]), []

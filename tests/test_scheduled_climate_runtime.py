@@ -24,6 +24,8 @@ for name in ("weekly_schedule", "climate_schedule", "charge_climate",
 win = sys.modules[f"{pkg.__name__}.climate_windows"]
 slots = sys.modules[f"{pkg.__name__}.climate_schedule"]
 linked = sys.modules[f"{pkg.__name__}.charge_climate"]
+comfort = sys.modules[f"{pkg.__name__}.comfort"]
+comfort_display = sys.modules[f"{pkg.__name__}.comfort_display"]
 
 clock = {"now": datetime(2026, 11, 21, 23, 50,
                          tzinfo=ZoneInfo("Australia/Brisbane"))}
@@ -137,7 +139,7 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
     async def test_linked_charge_preconditioning_runs_even_when_not_actively_charging(self):
         clock["now"] = datetime(2026, 11, 23, 6, 55,
                                  tzinfo=ZoneInfo("Australia/Brisbane"))
-        o = {"scheduled_climate_enabled": True,
+        o = {"scheduled_climate_enabled": False,
              "automatic_charging_enabled": True, "weekly_schedule": {
             "monday": {"enabled": True, "target": 80, "ready_time": "07:00"},
         }}
@@ -154,6 +156,80 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         await self.controller.async_tick()
         self.assertEqual(len(self.climate.calls), 2)
         self.assertEqual(self.climate.calls[1][1]["temperature"], 20)
+
+    async def test_monday_cool_runs_0640_to_0730_without_independent_master(self):
+        # User's actual configuration: Monday 07:00 car-ready deadline,
+        # linked Cool ON, 20-minute lead, 30-minute hold, independent OFF.
+        clock["now"] = datetime(2026, 11, 23, 6, 39,
+                                 tzinfo=ZoneInfo("Australia/Brisbane"))
+        opts = {
+            "scheduled_climate_enabled": False,
+            "automatic_charging_enabled": True,
+            "weekly_schedule": {"monday": {
+                "enabled": True, "target": 100, "ready_time": "07:00"
+            }},
+        }
+        opts = linked.set_value(opts, "monday", "enabled", True)
+        opts = linked.set_value(opts, "monday", "profile", "Cool")
+        opts = linked.set_timing(opts, "lead_minutes", 20)
+        opts = linked.set_timing(opts, "hold_minutes", 30)
+        opts = comfort.set_value(opts, "cool", "temperature", 16)
+        opts = comfort_display.set_seat_mode(opts, "cool", "driver", "Vent High")
+        opts = comfort_display.set_seat_mode(opts, "cool", "passenger", "Vent High")
+        self.entry.options = opts
+        await self.controller.async_tick()
+        self.assertEqual(self.climate.calls, [])
+        clock["now"] += timedelta(minutes=1)
+        await self.controller.async_tick()
+        self.assertEqual(self.controller.status, "RUNNING")
+        self.assertEqual(self.controller.active["kind"], "linked")
+        self.assertEqual([x[0] for x in self.climate.calls], ["on"])
+        self.assertEqual(self.climate.calls[0][1]["temperature"], 16)
+        self.assertEqual(self.climate.calls[0][1]["driver_seat"], "Vent High")
+        self.assertEqual(self.climate.calls[0][1]["passenger_seat"], "Vent High")
+        clock["now"] = datetime(2026, 11, 23, 7, 29,
+                                tzinfo=ZoneInfo("Australia/Brisbane"))
+        await self.controller.async_tick()
+        self.assertEqual([x[0] for x in self.climate.calls], ["on"])
+        clock["now"] += timedelta(minutes=1)
+        await self.controller.async_tick()
+        self.assertEqual([x[0] for x in self.climate.calls], ["on", "off"])
+
+    async def test_independent_remains_disabled_while_linked_comfort_works(self):
+        clock["now"] = datetime(2026, 11, 23, 6, 55,
+                                 tzinfo=ZoneInfo("Australia/Brisbane"))
+        opts = {
+            "scheduled_climate_enabled": False,
+            "automatic_charging_enabled": True,
+            "weekly_schedule": {"monday": {
+                "enabled": True, "target": 80, "ready_time": "07:00"
+            }},
+        }
+        opts = linked.set_value(opts, "monday", "enabled", True)
+        opts = slots.update_slot(opts, 1, "enabled", True)
+        opts = slots.update_slot(opts, 1, "day", "Monday")
+        opts = slots.update_slot(opts, 1, "ready_time", "07:00")
+        self.entry.options = opts
+        await self.controller.async_tick()
+        self.assertEqual(self.controller.active["kind"], "linked")
+        self.assertTrue(self.controller.active["key"].startswith("linked:"))
+        self.assertEqual(len(self.climate.calls), 1)
+
+    async def test_linked_comfort_waiting_does_not_claim_disabled(self):
+        clock["now"] = datetime(2026, 11, 23, 3, 0,
+                                 tzinfo=ZoneInfo("Australia/Brisbane"))
+        opts = {
+            "scheduled_climate_enabled": False,
+            "automatic_charging_enabled": True,
+            "weekly_schedule": {"monday": {
+                "enabled": True, "target": 100, "ready_time": "07:00"
+            }},
+        }
+        self.entry.options = linked.set_value(opts, "monday", "enabled", True)
+        await self.controller.async_tick()
+        self.assertEqual(self.controller.status, "WAITING")
+        self.assertIn("awaiting charging-linked comfort", self.controller.message)
+        self.assertEqual(self.climate.calls, [])
 
     async def test_disabling_active_schedule_stops_cabin(self):
         self.configure_independent()

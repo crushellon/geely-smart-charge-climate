@@ -2,9 +2,41 @@
 
 An early **experimental integration** for Home Assistant, designed for the **Geely EX5** using community Geely Connect telemetry. Other Geely models have not been verified.
 
-**Current build (v0.3.13 — strict vehicle-ready deadline enforcement; EX5 validation still required):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Independent and charging-linked cabin climate appointments issue real Geely commands **after you enable the new Scheduled climate enabled master switch**, with manual priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
+**Current build (v0.3.14 — charging-linked comfort independent of climate-only schedules; EX5 validation still required):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Charging-linked Cool/Warm runs whenever the specific EV Control departure day's comfort is enabled alongside its charging schedule. The separate Independent climate schedules enabled switch controls only the seven appointments on Climate Scheduler. Both functions retain manual climate priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
 
 **Public charging responsibility:** Turn **Public charging mode ON before connecting to any public charger**, and turn it OFF when returning to normal automatic charging. The integration does not detect home location or public charging automatically. When ON, automatic charging starts, unexpected-charge stops and manual charging commands from this integration are suppressed. The native switch persists across Home Assistant restarts. Existing `input_boolean.ev_public_charging_mode` installations are still honoured as an additional interlock, so both must be OFF to resume normal charging. The optional Tesla Wall Connector is never required for core control.
+
+## Separate charging-linked and independent climate controls (v0.3.14)
+
+In earlier versions the **Scheduled climate enabled** switch on the Climate
+Scheduler tab inadvertently blocked both independent appointments and the
+charging-linked Cool/Warm preferences already enabled for a departure day.
+That meant Monday's EV Control comfort could show ON but diagnostic attributes
+still said `linked_comfort_commands_enabled: false`.
+
+**Charging-linked comfort is now controlled solely by the normal EV Control
+charging-day appointment and its Cabin comfort enabled / Cool or Warm
+settings.** It requires Automatic charging enabled and the relevant charging
+day enabled, but it does not need the independent climate master switch.
+Manual climate overrides, Emergency Stop and Public Charging Mode continue
+to take precedence.
+
+The existing master switch now displays **Independent climate schedules
+enabled** and controls **only** the seven slots on Climate Scheduler. It
+retains the same unique ID, stored setting and dashboard placement, so no
+replacement controls or migration steps are necessary. Existing independent
+slots remain inactive while that switch is OFF.
+
+For example, Monday 23 November 2026 with a 07:00 vehicle-ready time,
+20-minute linked lead, 30-minute hold, and Comfort Cool at 16°C with Vent High
+on both seats should send cabin commands at **06:40** and finish at **07:30**,
+even if all independent climate appointments are OFF. The charging target
+itself is unchanged. The normal dashboard and Developer Tools → States can
+verify the result; no test buttons are involved.
+
+See [v0.3.14 linked comfort fix](docs/separate-linked-independent-climate.md).
+The software test suite verifies the logical separation; actual cloud
+activation and physical climate response still require EX5 validation.
 
 ## Strict ready-by charging cutoff (v0.3.13)
 
