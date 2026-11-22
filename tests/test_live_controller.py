@@ -30,6 +30,28 @@ activity_spec.loader.exec_module(activity)
 tree = ast.parse((ROOT / "live_control.py").read_text(encoding="utf-8"))
 body = next(node for node in tree.body
             if isinstance(node, ast.ClassDef) and node.name == "LiveChargeController")
+class DummyPush:
+    def __init__(self, runtime):
+        self.events = []
+
+    def observe_charging(self):
+        return None
+
+    def emit(self, key, title, message):
+        self.events.append((key, title, message))
+        return True
+
+    def charging_ended(self, **details):
+        self.events.append(("ended", details))
+
+    def check_control_changes(self):
+        return None
+
+
+def fake_fresh_event_id(key):
+    return key
+
+
 class DummyAutomatic:
     def __init__(self, manual):
         self.manual = manual
