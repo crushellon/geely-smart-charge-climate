@@ -2,9 +2,43 @@
 
 An early **experimental integration** for Home Assistant, designed for the **Geely EX5** using community Geely Connect telemetry. Other Geely models have not been verified.
 
-**Current build (v0.3.16 — real Home Assistant iPhone push notifications for charging, manual controls, safety and climate; EX5/iPhone validation still required):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Charging-linked Cool/Warm runs whenever the specific EV Control departure day's comfort is enabled alongside its charging schedule. The separate Independent climate schedules enabled switch controls only the seven appointments on Climate Scheduler. Both functions retain manual climate priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
+**Current build (v0.3.17 — startup unexpected-charge enforcement and Home Assistant callback thread-safety fixes; physical EX5 validation still required):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Charging-linked Cool/Warm runs whenever the specific EV Control departure day's comfort is enabled alongside its charging schedule. The separate Independent climate schedules enabled switch controls only the seven appointments on Climate Scheduler. Both functions retain manual climate priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
 
 **Public charging responsibility:** Turn **Public charging mode ON before connecting to any public charger**, and turn it OFF when returning to normal automatic charging. The integration does not detect home location or public charging automatically. When ON, automatic charging starts, unexpected-charge stops and manual charging commands from this integration are suppressed. The native switch persists across Home Assistant restarts. Existing `input_boolean.ev_public_charging_mode` installations are still honoured as an additional interlock, so both must be OFF to resume normal charging. The optional Tesla Wall Connector is never required for core control.
+
+## Startup charge enforcement and thread safety (v0.3.17)
+
+**Automatic charging enabled + Public Charging Mode OFF:** A charge not owned
+by a restored manual or automatic session is checked against the same normal
+charging policy even during the first 120 seconds after an integration reload.
+A genuinely unexpected home charge enters **CHECKING**, then requests
+**STOP_REQUESTED** after the existing 30-second grace period. Geely OFF and
+freshly reported power must subsequently confirm **STOPPED**. No blind
+stop or start is issued merely because Home Assistant has restarted.
+
+A previously created EXTERNAL marker is cleared when automatic control is
+enabled so it cannot silently block enforcement. If **Automatic charging is
+disabled**, unknown existing charging is observed without vehicle commands.
+**Public Charging Mode** remains the explicit exemption for public charging.
+Persisted integration-owned manual/automatic charge sessions still recover
+their saved targets and ownership across reloads.
+
+Fixed synchronous sensor event/periodic handlers that Home Assistant had
+executed from worker threads, causing repeated exceptions from
+`async_write_ha_state`. The scheduled manual-comfort expiry callback is also
+marked for event-loop execution so its async task is scheduled safely.
+
+**After installation:** Under Developer Tools → States, inspect **Automatic
+charging decision**, **Manual charging status**, **Vehicle charging status**,
+and **Observer status**. In Active mode an unattributed charge outside the
+window should progress through CHECKING → STOP_REQUESTED → STOPPED, subject to
+real Geely response. The **Vehicle charging status** sensor now also exposes
+`unattributed_charge_policy`. Confirm thread-safety errors stop appearing
+in Settings → System → Logs.
+
+**Safety:** This is still experimental code. Use the vehicle to stop a
+charging session that Home Assistant fails to stop. Do not use public chargers
+with Public Charging Mode OFF.
 
 ## Real iPhone push notifications (v0.3.16)
 

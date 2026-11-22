@@ -135,8 +135,24 @@ class LiveChargeController:
         return self.vehicle_activity()[0] in ("CHARGING", "CHARGING_REPORTED")
 
     def _observe_unmanaged(self):
-        """Keep a pre-existing/unattributed charge outside controller control."""
+        """Protect unknown sessions only while automatic enforcement is disabled.
+
+        Persistent manual/automatic owners are restored separately. When the
+        user has enabled automatic charging at home, ANY unowned charge must
+        pass through the actual schedule policy, including a charge first
+        observed during the 120-second integration-reload grace period.
+        Public Mode remains the explicit exemption for away/public charging.
+        """
         if self.owned or self.auto.owned or self.public_mode():
+            return
+        if self.entry.options.get("automatic_charging_enabled", False) is True:
+            if self.unmanaged_charge:
+                self.unmanaged_charge = False
+                self._unmanaged_stop_observations = 0
+                if self.status == "EXTERNAL":
+                    self.status = "IDLE"
+                    self.message = "Unattributed charging handed to automatic policy"
+                    self._notify()
             return
         activity, _ = self.vehicle_activity()
         if self.unmanaged_charge:
@@ -229,6 +245,9 @@ class LiveChargeController:
 
     async def async_reconcile_automatic(self, deliberate=False):
         """After manual, emergency, public or restart restore user's intent."""
+        # Clearing a legacy EXTERNAL observation before computing "blocked"
+        # is essential when Automatic is enabled after observing a charge.
+        self._observe_unmanaged()
         wanted = self.entry.options.get("automatic_charging_enabled", False) is True
         blocked = (self.owned or self.stop_requested_at is not None
                    or self.auto.stop_requested_at is not None

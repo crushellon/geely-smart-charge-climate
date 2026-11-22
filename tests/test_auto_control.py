@@ -827,20 +827,30 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
         self.assertIsNotNone(self.auto.stop_requested_at)
 
-    async def test_existing_charge_without_owner_is_not_stopped_by_schedule(self):
-        # Pre-existing charge encountered DURING startup is protected. New
-        # plug-in charges later are subject to the live schedule's deadlines.
+    async def test_startup_unowned_charge_outside_window_stops_after_grace(self):
+        # Even a stale EXTERNAL marker cannot bypass an explicitly active
+        # automatic controller. The 30-second debounce still applies.
         self.manual.unmanaged_charge = True
         self.entry.options["weekly_schedule"] = {}
         self.values["switch.car"] = "on"
         self.values["sensor.power"] = "6"
         await self.auto.async_set_mode("Active")
-        self.assertEqual(self.auto.status, "EXTERNAL")
+        self.assertEqual(self.auto.status, "CHECKING")
         self.assertEqual(self.services.calls, [])
+        self.assertEqual(self.auto.decision.action, "STOP")
+        self.auto.unexpected_since = env["dt_util"].utcnow() - timedelta(seconds=31)
         await self.auto.async_tick()
-        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_off"])
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+
+    async def test_startup_unowned_charge_inside_valid_window_is_adopted(self):
+        self.manual.unmanaged_charge = True
+        self.values["switch.car"] = "on"
+        self.values["sensor.power"] = "6"
+        await self.auto.async_set_mode("Active")
+        self.assertTrue(self.auto.owned)
+        self.assertEqual(self.auto.status, "CHARGING")
         self.assertEqual(self.services.calls, [])
-        self.assertIn("ownership unknown", self.auto.message)
 
     async def test_geely_only_works_without_charging_power_entity(self):
         self.manual.charging_power = None

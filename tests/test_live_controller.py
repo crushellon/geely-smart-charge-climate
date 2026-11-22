@@ -304,6 +304,47 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.status, "BLOCKED")
         self.assertEqual(self.services.calls, [])
 
+    async def test_active_automatic_charge_during_startup_is_not_external(self):
+        # The Geely may begin charging immediately upon plug-in/reload.
+        # Within 120 seconds, automatic intent must still be able to stop it.
+        self.controller.entry.options["automatic_charging_enabled"] = True
+        self.states.data["switch.car"].state = "on"
+        self.states.data["sensor.power"].state = "6.5"
+        await self.controller.async_restore()
+        self.assertFalse(self.controller.unmanaged_charge)
+        self.assertFalse(self.controller.owned)
+        self.assertEqual(self.controller.auto.mode, "Active")
+
+    async def test_new_charge_in_startup_window_uses_automatic_policy(self):
+        self.controller.entry.options["automatic_charging_enabled"] = True
+        await self.controller.async_restore()
+        self.assertFalse(self.controller.unmanaged_charge)
+        # Still inside the startup observation window, but AFTER initial
+        # observation (not a genuinely pre-existing charge).
+        self.states.data["switch.car"].state = "on"
+        self.states.data["sensor.power"].state = "6.5"
+        self.controller._observe_unmanaged()
+        self.assertFalse(self.controller.unmanaged_charge)
+        self.assertEqual(self.controller.auto.mode, "Active")
+
+    async def test_enabling_automatic_clears_previous_external_observation(self):
+        self.states.data["switch.car"].state = "on"
+        self.states.data["sensor.power"].state = "6.5"
+        await self.controller.async_restore()
+        self.assertTrue(self.controller.unmanaged_charge)
+        await self.controller.async_set_automatic_enabled(True)
+        self.assertFalse(self.controller.unmanaged_charge)
+        self.assertEqual(self.controller.auto.mode, "Active")
+
+    async def test_public_mode_preserves_charge_on_reload(self):
+        self.controller.entry.options["automatic_charging_enabled"] = True
+        self.controller.entry.options["public_charging_mode"] = True
+        self.states.data["switch.car"].state = "on"
+        self.states.data["sensor.power"].state = "6.5"
+        await self.controller.async_restore()
+        self.assertEqual(self.controller.auto.mode, "Off")
+        self.assertEqual(self.services.calls, [])
+
     async def test_wallbox_power_prevents_false_manual_stop_confirmation(self):
         self.states.data["sensor.tesla_wall_connector_total_power"] = SimpleNamespace(
             state="0"

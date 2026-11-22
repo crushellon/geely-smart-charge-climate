@@ -7,6 +7,7 @@ HA restart so a previously applied climate session isn't fired repeatedly.
 import asyncio
 from datetime import datetime, timedelta
 
+from homeassistant.core import callback
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
 
@@ -78,6 +79,7 @@ class ScheduledClimateController:
         if due is None or due <= dt_util.now():
             return
 
+        @callback
         def expire(_now):
             self._manual_timer_unsub = None
             self.hass.async_create_task(self.async_tick())
