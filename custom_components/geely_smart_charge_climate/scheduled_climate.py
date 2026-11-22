@@ -236,7 +236,8 @@ class ScheduledClimateController:
                     self.manual._notify()
                     return
 
-                self._arm_manual_expiry() if self._manual_timer_unsub is None else None
+                if self._manual_timer_unsub is None:
+                    self._arm_manual_expiry()
                 self.status = "MANUAL"
                 self.message = (
                     "Manual comfort active until "
