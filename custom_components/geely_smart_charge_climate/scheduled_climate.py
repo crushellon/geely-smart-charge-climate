@@ -147,6 +147,7 @@ class ScheduledClimateController:
                     if self.manual_expires_at is not None else None
                 ),
                 climate_suppressed_occurrence=self.suppressed_key,
+                manual_climate_timeout_error=None,
             )
 
     async def async_tick(self):
