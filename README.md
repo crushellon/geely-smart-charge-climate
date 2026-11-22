@@ -2,9 +2,42 @@
 
 An early **experimental integration** for Home Assistant, designed for the **Geely EX5** using community Geely Connect telemetry. Other Geely models have not been verified.
 
-**Current build (v0.3.14 — charging-linked comfort independent of climate-only schedules; EX5 validation still required):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Charging-linked Cool/Warm runs whenever the specific EV Control departure day's comfort is enabled alongside its charging schedule. The separate Independent climate schedules enabled switch controls only the seven appointments on Climate Scheduler. Both functions retain manual climate priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
+**Current build (v0.3.15 — manual comfort automatically switches OFF after 30 minutes; EX5 validation still required):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Charging-linked Cool/Warm runs whenever the specific EV Control departure day's comfort is enabled alongside its charging schedule. The separate Independent climate schedules enabled switch controls only the seven appointments on Climate Scheduler. Both functions retain manual climate priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
 
 **Public charging responsibility:** Turn **Public charging mode ON before connecting to any public charger**, and turn it OFF when returning to normal automatic charging. The integration does not detect home location or public charging automatically. When ON, automatic charging starts, unexpected-charge stops and manual charging commands from this integration are suppressed. The native switch persists across Home Assistant restarts. Existing `input_boolean.ev_public_charging_mode` installations are still honoured as an additional interlock, so both must be OFF to resume normal charging. The optional Tesla Wall Connector is never required for core control.
+
+## Manual comfort 30-minute auto-OFF (v0.3.15)
+
+The finished **Comfort Cool**, **Comfort Warm** and **Custom temperature
+ON** buttons on EV Control now have an **automatic 30-minute maximum
+session**. Pressing any one starts a fresh 30-minute deadline. At expiry,
+Home Assistant sends the same Geely actions as **Climate + seats OFF**:
+cabin OFF, both driver/passenger seat heat/vent OFF, and steering heat OFF.
+The existing OFF button still allows an immediate stop.
+
+Manual ownership is then released so future **charging-linked and
+independent climate appointments** can run normally. The manually
+superseded occurrence stays suppressed so it cannot immediately turn
+the car on again. No climate timer, developer control or extra button
+was added to the user's four-tab dashboard.
+
+The absolute expiry is **persisted through HA restart**; after a restart
+it cannot be extended accidentally. On startup, an old legacy MANUAL
+override with no deadline is expired and stopped rather than blocking
+all future scheduled climate. Actual service requests use an exact
+Home Assistant deadline callback plus 15-second periodic fallback.
+If an OFF request fails, the controller retries up to three times
+one minute apart and leaves a visible error in existing HA States.
+Cloud service acknowledgment is not proof of the physical vehicle
+state and should be verified on the EX5.
+
+Inspect the existing **Manual climate status** sensor attributes:
+`manual_comfort_active`, `auto_off_after_minutes` (30),
+`manual_comfort_expires_at`, `manual_comfort_seconds_remaining`,
+and `manual_comfort_timeout_error`. **No charging switch commands**
+are issued by the manual comfort timer.
+
+See [the v0.3.15 manual comfort auto-OFF guide](docs/manual-comfort-30-minute-auto-off.md).
 
 ## Separate charging-linked and independent climate controls (v0.3.14)
 

@@ -29,12 +29,24 @@ comfort_display = sys.modules[f"{pkg.__name__}.comfort_display"]
 
 clock = {"now": datetime(2026, 11, 21, 23, 50,
                          tzinfo=ZoneInfo("Australia/Brisbane"))}
+alarm_events = []
+
+def schedule_exact(hass, callback, deadline):
+    alarm = {"callback": callback, "at": deadline, "cancelled": False}
+    alarm_events.append(alarm)
+    def unsubscribe():
+        alarm["cancelled"] = True
+    return unsubscribe
 tree = ast.parse((ROOT / "scheduled_climate.py").read_text())
 cls = next(x for x in tree.body if isinstance(x, ast.ClassDef)
            and x.name == "ScheduledClimateController")
 env = {"asyncio": asyncio, "datetime": datetime, "timedelta": timedelta,
        "dt_util": SimpleNamespace(now=lambda: clock["now"]),
-       "candidate_windows": win.candidate_windows}
+       "candidate_windows": win.candidate_windows,
+       "MANUAL_COMFORT_MAX": timedelta(minutes=30),
+       "MANUAL_OFF_RETRY": timedelta(seconds=60),
+       "MANUAL_OFF_MAX_ATTEMPTS": 3,
+       "async_track_point_in_time": schedule_exact}
 exec(compile(ast.Module(body=[cls], type_ignores=[]), "scheduled_climate.py", "exec"), env)
 Controller = env["ScheduledClimateController"]
 
@@ -43,6 +55,11 @@ class FakeCabin:
     def __init__(self):
         self.calls = []
         self.succeed = True
+        self.manual_off_succeeds = True
+
+    async def apply(self, action):
+        self.calls.append(("manual_" + action, None))
+        return self.manual_off_succeeds
 
     async def apply_scheduled(self, settings):
         self.calls.append(("on", dict(settings)))
@@ -57,11 +74,14 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         clock["now"] = datetime(2026, 11, 21, 23, 50,
                                  tzinfo=ZoneInfo("Australia/Brisbane"))
+        alarm_events.clear()
         self.entry = SimpleNamespace(options={"scheduled_climate_enabled": True})
         self.climate = FakeCabin()
         self.messages = []
         self.manual = SimpleNamespace(
-            entry=self.entry, hass=SimpleNamespace(),
+            entry=self.entry, hass=SimpleNamespace(
+                async_create_task=asyncio.create_task
+            ),
             climate=self.climate,
             _save_options=lambda **vals: self.entry.options.update(vals),
             _raw=lambda entity: "off",
@@ -135,6 +155,175 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         await self.controller.async_tick()
         self.assertEqual([x[0] for x in self.climate.calls], ["on"])
         self.assertFalse(self.controller.manual_override)
+
+    async def test_manual_comfort_auto_off_at_30_minutes_and_unlocks_schedules(self):
+        start = clock["now"]
+        await self.controller.async_manual_override("Cool")
+        self.assertTrue(self.controller.manual_override)
+        self.assertEqual(
+            self.controller.manual_expires_at, start + timedelta(minutes=30)
+        )
+        self.assertEqual(
+            self.entry.options["manual_climate_expires_at"],
+            (start + timedelta(minutes=30)).isoformat()
+        )
+        self.assertEqual(len(alarm_events), 1)
+        self.assertEqual(alarm_events[-1]["at"], start + timedelta(minutes=30))
+
+        clock["now"] = start + timedelta(minutes=29, seconds=59)
+        await self.controller.async_tick()
+        self.assertEqual(self.climate.calls, [])
+        self.assertTrue(self.controller.manual_override)
+
+        clock["now"] = start + timedelta(minutes=30)
+        await self.controller.async_tick()
+        self.assertEqual(self.climate.calls, [("manual_off", None)])
+        self.assertFalse(self.controller.manual_override)
+        self.assertIsNone(self.controller.manual_expires_at)
+        self.assertFalse(self.entry.options["manual_climate_override"])
+        self.assertIsNone(self.entry.options["manual_climate_expires_at"])
+        self.assertIn("automatically switched OFF", self.controller.message)
+
+        # Without another ON press, no repeated cloud OFF commands.
+        await self.controller.async_tick()
+        self.assertEqual(self.climate.calls, [("manual_off", None)])
+
+    async def test_real_deadline_callback_executes_without_waiting_for_periodic_tick(self):
+        await self.controller.async_manual_override("Cool")
+        alarm = alarm_events[-1]
+        clock["now"] = alarm["at"]
+        alarm["callback"](clock["now"])
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        self.assertEqual(self.climate.calls, [("manual_off", None)])
+        self.assertFalse(self.controller.manual_override)
+        self.assertIsNone(self.controller.manual_expires_at)
+
+    async def test_each_manual_press_resets_the_30_minute_timer(self):
+        start = clock["now"]
+        await self.controller.async_manual_override("Cool")
+        first = alarm_events[-1]
+        clock["now"] += timedelta(minutes=20)
+        await self.controller.async_manual_override("Warm")
+        self.assertTrue(first["cancelled"])
+        self.assertEqual(
+            self.controller.manual_expires_at, clock["now"] + timedelta(minutes=30)
+        )
+        clock["now"] = start + timedelta(minutes=30)
+        await self.controller.async_tick()
+        self.assertEqual(self.climate.calls, [])
+        clock["now"] = start + timedelta(minutes=50)
+        await self.controller.async_tick()
+        self.assertEqual(self.climate.calls, [("manual_off", None)])
+
+    async def test_custom_temperature_button_also_expires_after_30_minutes(self):
+        start = clock["now"]
+        await self.controller.async_manual_override("custom")
+        self.assertTrue(self.controller.manual_override)
+        self.assertEqual(
+            self.controller.manual_expires_at,
+            start + timedelta(minutes=30)
+        )
+        clock["now"] += timedelta(minutes=30)
+        await self.controller.async_tick()
+        self.assertEqual(self.climate.calls, [("manual_off", None)])
+
+    async def test_explicit_manual_off_cancels_timer_and_override(self):
+        await self.controller.async_manual_override("Warm")
+        current_alarm = alarm_events[-1]
+        await self.controller.async_manual_override("off")
+        self.assertTrue(current_alarm["cancelled"])
+        self.assertFalse(self.controller.manual_override)
+        self.assertIsNone(self.controller.manual_expires_at)
+        clock["now"] += timedelta(minutes=31)
+        await self.controller.async_tick()
+        self.assertEqual(self.climate.calls, [])
+
+    async def test_restart_recovers_original_deadline_without_extending_it(self):
+        start = clock["now"]
+        await self.controller.async_manual_override("Cool")
+        old_deadline = self.controller.manual_expires_at
+        await self.controller.async_shutdown()
+        self.assertTrue(alarm_events[-1]["cancelled"])
+        clock["now"] += timedelta(minutes=12)
+        restarted = Controller(self.manual)
+        await restarted.async_tick()
+        self.assertEqual(restarted.status, "MANUAL")
+        self.assertEqual(restarted.manual_expires_at, old_deadline)
+        clock["now"] = start + timedelta(minutes=30)
+        await restarted.async_tick()
+        self.assertEqual(self.climate.calls, [("manual_off", None)])
+        self.assertFalse(restarted.manual_override)
+
+    async def test_restart_after_expiry_sends_off_immediately(self):
+        await self.controller.async_manual_override("Warm")
+        clock["now"] += timedelta(minutes=38) # HA was down after expiry.
+        recovered = Controller(self.manual)
+        await recovered.async_tick()
+        self.assertEqual(self.climate.calls, [("manual_off", None)])
+        self.assertFalse(recovered.manual_override)
+
+    async def test_legacy_stuck_manual_override_expires_on_upgrade(self):
+        self.entry.options["manual_climate_override"] = True
+        self.entry.options.pop("manual_climate_expires_at", None)
+        restored = Controller(self.manual)
+        await restored.async_tick()
+        self.assertEqual(self.climate.calls, [("manual_off", None)])
+        self.assertFalse(restored.manual_override)
+
+    async def test_failed_off_retries_three_times_then_unblocks_with_error(self):
+        self.climate.manual_off_succeeds = False
+        await self.controller.async_manual_override("Cool")
+        clock["now"] += timedelta(minutes=30)
+        await self.controller.async_tick()
+        self.assertTrue(self.controller.manual_override)
+        self.assertEqual(self.controller.status, "ERROR")
+        self.assertEqual(len(self.climate.calls), 1)
+        clock["now"] += timedelta(seconds=59)
+        await self.controller.async_tick()
+        self.assertEqual(len(self.climate.calls), 1)
+        clock["now"] += timedelta(seconds=1)
+        await self.controller.async_tick()
+        self.assertEqual(len(self.climate.calls), 2)
+        clock["now"] += timedelta(seconds=60)
+        await self.controller.async_tick()
+        self.assertEqual(len(self.climate.calls), 3)
+        self.assertFalse(self.controller.manual_override)
+        self.assertIn("failed three times", self.controller.message)
+        self.assertIn("inspect Geely", self.controller.message)
+        self.assertFalse(self.entry.options["manual_climate_override"])
+
+    async def test_unconfirmed_manual_on_keeps_auto_off_to_prevent_delayed_cloud_start(self):
+        await self.controller.async_manual_override("Cool")
+        deadline = self.controller.manual_expires_at
+        await self.controller.async_manual_result("Cool", False)
+        self.assertTrue(self.controller.manual_override)
+        self.assertEqual(self.controller.manual_expires_at, deadline)
+        self.assertEqual(self.controller.status, "ERROR")
+        self.assertIn("OFF remains armed", self.controller.message)
+        # The Geely command may take effect even after its API call errors.
+        # An OFF still goes out at the original 30-minute deadline.
+        clock["now"] = deadline
+        await self.controller.async_tick()
+        self.assertEqual(self.climate.calls, [("manual_off", None)])
+        self.assertFalse(self.controller.manual_override)
+
+    async def test_normal_future_schedules_continue_after_manual_expiry(self):
+        start = clock["now"]
+        await self.controller.async_manual_override("Cool")
+        clock["now"] += timedelta(minutes=30)
+        await self.controller.async_tick()
+        self.assertFalse(self.controller.manual_override)
+        # A different, later appointment is allowed to activate.
+        options = slots.update_slot(self.entry.options, 2, "enabled", True)
+        options = slots.update_slot(options, 2, "day", "Sunday")
+        options = slots.update_slot(options, 2, "ready_time", "00:25")
+        self.entry.options = options
+        await self.controller.async_tick()
+        self.assertEqual(
+            [x[0] for x in self.climate.calls],
+            ["manual_off", "on"]
+        )
 
     async def test_linked_charge_preconditioning_runs_even_when_not_actively_charging(self):
         clock["now"] = datetime(2026, 11, 23, 6, 55,

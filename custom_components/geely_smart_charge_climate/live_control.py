@@ -396,7 +396,10 @@ class LiveChargeController:
             self._notify()
             return
         await self.scheduled_climate.async_manual_override(action)
-        await self.climate.apply(action)
+        # The existing user button is the only ON path. A failed Geely call
+        # must not leave the schedule in MANUAL indefinitely.
+        success = await self.climate.apply(action)
+        await self.scheduled_climate.async_manual_result(action, success)
 
     async def async_resume_schedule(self):
         """Deliberate return from manual charging to automatic scheduling."""
@@ -728,6 +731,7 @@ class LiveChargeController:
 
     async def async_shutdown(self):
         await self.auto.async_shutdown()
+        await self.scheduled_climate.async_shutdown()
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()

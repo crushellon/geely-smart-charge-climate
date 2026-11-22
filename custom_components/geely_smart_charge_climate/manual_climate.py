@@ -1,8 +1,8 @@
-"""Explicit user-operated EX5 comfort, independent of scheduled climate.
+"""Geely EX5 comfort commands for manual buttons and live schedules.
 
-This module only runs on a real button press. The charging-linked comfort
-and independent climate schedules are still configuration/simulation only.
-Every optional actuator is checked before issuing a service call.
+Each actuator is checked before an actual service call. The owner/controller
+handles manual 30-minute expiry, repeat actions and restart recovery; this
+adapter only applies or turns OFF vehicle climate/seats/steering.
 """
 import asyncio
 import logging
@@ -30,7 +30,7 @@ def geely_climate_entities(battery_entity):
 
 
 class ManualClimateController:
-    """Send only requested manual climate commands; no timer automation."""
+    """Apply real manual climate; owner enforces expiry outside this adapter."""
 
     def __init__(self, hass, entry, notify):
         self.hass = hass
@@ -66,7 +66,9 @@ class ManualClimateController:
             return await self._request("select", "select_option", vent, option=level)
         left = await self._request("select", "select_option", heat, option="Off")
         right = await self._request("select", "select_option", vent, option="Off")
-        return left or right
+        # BOTH heating and ventilation must report a successful OFF
+        # service request; a missing seat control is not proof of shutdown.
+        return left and right
 
     async def apply_scheduled(self, settings):
         """Apply one approved scheduled comfort session.
@@ -116,18 +118,27 @@ class ManualClimateController:
         async with self._lock:
             climate = self.entities.get("climate")
             if (not climate or self.hass.states.get(climate) is None):
-                self.status = "UNAVAILABLE"
-                self.message = "Geely climate entity not detected for this vehicle"
-                self.notify()
-                return
+                if action != "off":
+                    self.status = "UNAVAILABLE"
+                    self.message = "Geely climate entity not detected for this vehicle"
+                    self.notify()
+                    return False
+                # Even if the main cabin entity is temporarily missing,
+                # still request OFF on seat heat/vent and steering wheel.
+                # The overall OFF is unconfirmed and will be retried.
             self.status = "REQUESTING"
             self.message = f"Sending manual {action} climate request"
             self.notify()
             if action == "off":
-                main_ok = await self._request("climate", "turn_off", climate)
-                await self._seat("driver", "Off")
-                await self._seat("passenger", "Off")
-                await self._request("switch", "turn_off", self.entities["steering"])
+                cabin_ok = await self._request("climate", "turn_off", climate)
+                driver_ok = await self._seat("driver", "Off")
+                passenger_ok = await self._seat("passenger", "Off")
+                wheel_ok = await self._request(
+                    "switch", "turn_off", self.entities["steering"]
+                )
+                # Continue sending every OFF even if an earlier actuator
+                # failed. The 30m owner can retry an incomplete shutdown.
+                main_ok = cabin_ok and driver_ok and passenger_ok and wheel_ok
             else:
                 temp = (
                     self.entry.options.get("manual_cabin_temperature", 22.0)
@@ -160,3 +171,4 @@ class ManualClimateController:
                 if main_ok else "Climate request failed or Geely entity unavailable"
             )
             self.notify()
+            return main_ok
