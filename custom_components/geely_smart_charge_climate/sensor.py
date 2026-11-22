@@ -348,9 +348,9 @@ class AutomaticChargeStatusSensor(SensorEntity):
             "linked_comfort_steering_heat": comfort["steering_heat"] if comfort else None,
             "linked_comfort_lead_minutes": comfort["lead_minutes"] if comfort else None,
             "linked_comfort_hold_minutes": comfort["hold_minutes"] if comfort else None,
-            "linked_comfort_commands_enabled": self.entry.options.get(
-                "scheduled_climate_enabled", False
-            ) is True,
+            "linked_comfort_commands_enabled": (
+                comfort["commands_enabled"] if comfort else False
+            ),
             "stop_attempts": auto.stop_attempts,
             "stop_confirmation_pending": auto.stop_requested_at is not None,
             "stop_verification": (
@@ -372,9 +372,23 @@ class AutomaticChargeStatusSensor(SensorEntity):
             "automatic_enabled_preference": self.entry.options.get(
                 "automatic_charging_enabled", False
             ) is True,
-            "climate_commands_enabled": self.entry.options.get(
-                "scheduled_climate_enabled", False
-            ) is True,
+            "climate_commands_enabled": (
+                self.entry.options.get("scheduled_climate_enabled", False) is True
+                or any(
+                    isinstance(config, dict)
+                    and config.get("enabled") is True
+                    and self.entry.options.get("automatic_charging_enabled") is True
+                    and self.entry.options.get(
+                        "weekly_schedule", {}
+                    ).get(day, {}).get("enabled") is True
+                    for day, config in self.entry.options.get(
+                        "charging_linked_comfort", {}
+                    ).items()
+                )
+            ),
+            "independent_climate_commands_enabled": (
+                self.entry.options.get("scheduled_climate_enabled", False) is True
+            ),
             "enabled_schedule_days": [
                 day for day, values in
                 self.entry.options.get("weekly_schedule", {}).items()
