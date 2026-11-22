@@ -199,6 +199,23 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
         self.assertIn("disconnected after ready-by", self.auto.stop_context)
 
+    async def test_100_can_finish_without_optional_power_sensor(self):
+        global now
+        self.entry.options["weekly_schedule"]["monday"] = {
+            "enabled": True, "target": 100, "ready_time": "09:30"
+        }
+        self.manual.charging_power = None
+        now = datetime(2026, 11, 23, 8,
+                       tzinfo=ZoneInfo("Australia/Brisbane"))
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_tick()
+        self.assertTrue(self.auto.full_overrun_authorized)
+        now = datetime(2026, 11, 23, 11,
+                       tzinfo=ZoneInfo("Australia/Brisbane"))
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on"])
+        self.assertTrue(self.auto.owned)
+
     async def test_restore_expired_80_percent_does_not_wait_for_recovery_grace(self):
         global now
         now = datetime(2026, 11, 23, 18, 33,
