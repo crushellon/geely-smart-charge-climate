@@ -68,6 +68,9 @@ def independent_climate_schedule_cards(entity_ids: dict[str, str]) -> list[dict]
         {
             "type": "markdown",
             "content": "## Independent cabin comfort\n"
+            "This page controls independent appointments only. "
+            "Charging-linked Cool/Warm is enabled separately for each day "
+            "under EV Control and does not require this master switch. "
             "Seven independent weekly appointments, with their own day, "
             "ready-by time, cabin temperature, seat settings and lead/hold "
             "times. These do not require charging or a cable. "
@@ -79,7 +82,7 @@ def independent_climate_schedule_cards(entity_ids: dict[str, str]) -> list[dict]
             "show_header_toggle": False,
             "entities": [
                 {"entity": entity_ids["scheduled_climate_enabled"],
-                 "name": "Scheduled climate enabled"},
+                 "name": "Independent climate schedules enabled"},
                 {"entity": entity_ids["scheduled_climate_status"],
                  "name": "Climate session"},
                 {"entity": entity_ids["climate_next"],
