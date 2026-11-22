@@ -121,6 +121,42 @@ class ManualClimateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len([c for c in self.services.calls
                               if c[:2] == ("select", "select_option")]), 4)
 
+    async def test_manual_off_reports_success_only_if_all_actuators_acknowledge(self):
+        self.assertTrue(await self.control.apply("off"))
+        self.assertEqual(self.control.status, "REQUESTED")
+
+        # Missing passenger ventilation cannot be treated as completed OFF.
+        self.services.calls.clear()
+        self.hass.states.get = lambda entity: (
+            None if entity == self.vehicle["passenger_vent"]
+            else SimpleNamespace(state="off")
+        )
+        self.assertFalse(await self.control.apply("off"))
+        self.assertEqual(self.control.status, "ERROR")
+        self.assertIn(("climate", "turn_off", {
+            "entity_id": self.vehicle["climate"],
+        }), self.services.calls)
+        self.assertIn(("switch", "turn_off", {
+            "entity_id": self.vehicle["steering"],
+        }), self.services.calls)
+        self.assertTrue(all(
+            item[2]["entity_id"] != "switch.my_geely_ex5_4034_charging"
+            for item in self.services.calls
+        ))
+
+    async def test_main_cabin_unavailable_still_attempts_seats_and_wheel_off(self):
+        self.hass.states.get = lambda entity: (
+            None if entity == self.vehicle["climate"]
+            else SimpleNamespace(state="off")
+        )
+        self.assertFalse(await self.control.apply("off"))
+        self.assertIn(("select", "select_option", {
+            "entity_id": self.vehicle["driver_vent"], "option": "Off",
+        }), self.services.calls)
+        self.assertIn(("switch", "turn_off", {
+            "entity_id": self.vehicle["steering"],
+        }), self.services.calls)
+
     async def test_scheduled_warm_then_off_never_touches_charging_switch(self):
         desired = {
             "temperature": 24.5, "driver_seat": "Heat Medium",
