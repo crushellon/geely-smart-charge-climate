@@ -52,6 +52,10 @@ class AutomaticChargeController:
         self.owned_deadline = None
         self.started_at = None
         self.saw_charging = False
+        # Only a 100% session with positive charging evidence BEFORE its
+        # ready-by deadline may continue beyond it for Geely-managed balancing.
+        # A missed morning departure may never resume from an evening plug-in.
+        self.full_overrun_authorized = False
         self.off_checks = 0
         self.unexpected_since = None
         self.stop_requested_at = None
@@ -100,6 +104,14 @@ class AutomaticChargeController:
             return value if isfinite(value) and 0 <= value <= 100 else None
         except (TypeError, ValueError):
             return None
+
+    def _confirmed_charge_power(self):
+        """Positive Geely or optional read-only wallbox power, not switch ON alone."""
+        power = self._power()
+        wallbox = (self.manual._wallbox_kw()
+                   if hasattr(self.manual, "_wallbox_kw") else None)
+        return ((power is not None and power > 0.25)
+                or (wallbox is not None and wallbox > 0.25))
 
     def _charging(self):
         state = self._raw(self.manual.charging_switch)
@@ -245,7 +257,8 @@ class AutomaticChargeController:
         session = (
             {"active": True, "target": self.owned_target,
              "day": self.owned_day, "deadline": self.owned_deadline.isoformat(),
-             "stop_pending": self.stop_requested_at is not None}
+             "stop_pending": self.stop_requested_at is not None,
+             "full_overrun_authorized": self.full_overrun_authorized}
             if active and self.owned_deadline else {"active": False}
         )
         if hasattr(self.manual, "_save_options"):
@@ -288,6 +301,9 @@ class AutomaticChargeController:
         self.owned_target = target
         self.owned_day = day
         self.owned_deadline = deadline
+        self.full_overrun_authorized = (
+            saved.get("full_overrun_authorized") is True and target == 100
+        )
         self.started_at = dt_util.utcnow()
         if saved.get("stop_pending") is True:
             # Persisted explicit STOP survives reload. Never send START.
@@ -350,8 +366,15 @@ class AutomaticChargeController:
             await self.async_tick()
 
     async def _request_start(self, plan):
-        """Start only when Geely telemetry and user-operated guards permit."""
+        """Start only before the exact ready-by cutoff and under all guards."""
         if self.mode != "Active" or self.manual.armed or self.manual.owned:
+            return
+        if plan.ready_by is None or dt_util.now() >= plan.ready_by:
+            self._update(
+                "EXPIRED",
+                "The scheduled ready-by deadline has passed; no late START",
+                plan,
+            )
             return
         # One session per departure calendar day, even if its ready-by
         # time changes while that session is owned.
@@ -410,6 +433,7 @@ class AutomaticChargeController:
         self.owned_deadline = plan.ready_by
         self.started_at = dt_util.utcnow()
         self._recovery_started_at = None
+        self.full_overrun_authorized = False
         self._persist_session(True)
         if hasattr(self.manual, "_save_options"):
             self.manual._save_options(manual_session={"active": False})
@@ -490,6 +514,7 @@ class AutomaticChargeController:
         self.owned_deadline = None
         self.started_at = None
         self.saw_charging = False
+        self.full_overrun_authorized = False
         self.off_checks = 0
         self.stop_requested_at = None
         self.stop_started_at = None
@@ -527,6 +552,11 @@ class AutomaticChargeController:
                    deadline != self.owned_deadline)
         self.owned_target = settings["target"]
         self.owned_deadline = deadline
+        if changed:
+            # A newly edited target/ready-by is fresh intent, not a license
+            # to inherit a 100%-balancing extension from the old plan.
+            self.full_overrun_authorized = False
+            self._persist_session(True)
 
         if changed:
             soc = self._soc()
@@ -639,6 +669,21 @@ class AutomaticChargeController:
                 return
 
             if self.owned:
+                # The deadline closes the appointment absolutely, even while
+                # recovering HA state. Non-100% sessions STOP at ready-by
+                # regardless of SoC. For 100%, ONLY an established physical
+                # charge already flowing before ready-by can keep running.
+                # Never permit a previously missed charge to begin on a later
+                # plug event, even if Geely has not reported a start yet.
+                if self.owned_deadline is not None and dt_util.now() >= self.owned_deadline:
+                    if self.owned_target < 100:
+                        await self._request_stop("Scheduled ready-by deadline reached")
+                        return
+                    if not self.full_overrun_authorized:
+                        await self._request_stop(
+                            "100% ready-by deadline passed without confirmed prior charging"
+                        )
+                        return
                 if self._recovery_started_at is not None:
                     # Cloud switch telemetry often lags actual wallbox power.
                     # Hold the previous ownership for a bounded grace period
@@ -676,19 +721,30 @@ class AutomaticChargeController:
                     return
                 if not await self._reconcile_owned_schedule():
                     return
+                # The schedule may have been edited on this tick. Reapply the
+                # cutoff to the revised deadline before any continuation.
+                if self.owned_deadline is not None and dt_util.now() >= self.owned_deadline:
+                    if self.owned_target < 100:
+                        await self._request_stop("Scheduled ready-by deadline reached")
+                        return
+                    if not self.full_overrun_authorized:
+                        await self._request_stop(
+                            "100% ready-by deadline passed without confirmed prior charging"
+                        )
+                        return
+                if (self.owned_target == 100
+                        and self.owned_deadline is not None
+                        and dt_util.now() < self.owned_deadline
+                        and self._confirmed_charge_power()
+                        and not self.full_overrun_authorized):
+                    self.full_overrun_authorized = True
+                    self._persist_session(True)
                 soc = self._soc()
                 if self.owned_target < 100 and (soc is None or soc >= self.owned_target):
                     await self._request_stop(
                         "Scheduled battery target reached" if soc is not None
                         else "Battery telemetry lost"
                     )
-                    return
-                if (
-                    self.owned_target < 100
-                    and self.owned_deadline is not None
-                    and dt_util.now() >= self.owned_deadline + timedelta(hours=3)
-                ):
-                    await self._request_stop("Scheduled charge exceeded maximum overrun")
                     return
                 if self._charging():
                     self.saw_charging = True
