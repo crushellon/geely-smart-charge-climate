@@ -186,12 +186,39 @@ class VehiclePushNotifications:
                 "Geely control changed", message,
             )
 
-    def _charge_start_message(self, name, target, ready_by, start_soc, current_soc):
+    def _charge_start_message(self, name, target, ready_by, start_soc, current_soc,
+                              power_confirmed=True):
+        confirmation = (
+            "charging power confirmed" if power_confirmed else
+            "Geely charging switch reports ON (power sensor unavailable)"
+        )
         return (
-            f"{name} charging confirmed at {percent(current_soc)}. "
+            f"{name} {confirmation} at {percent(current_soc)}. "
             f"Started at {percent(start_soc)}; target {percent(target)}."
             + (f" Ready by {time_label(ready_by)}." if ready_by else "")
         )
+
+    def _fresh_vehicle_feedback(self, started_at):
+        """Never label stale pre-command power as a newly started charge."""
+        if started_at is None:
+            return False
+        sources = [
+            self.runtime.charging_power,
+            getattr(self.runtime, "wallbox_power", None),
+        ]
+        if self.runtime.charging_power is None:
+            sources.append(self.runtime.charging_switch)
+        for entity in sources:
+            if not entity:
+                continue
+            state = self.hass.states.get(entity) if hasattr(self.hass, "states") else None
+            if state is None:
+                continue
+            stamp = (getattr(state, "last_reported", None)
+                     or getattr(state, "last_updated", None))
+            if stamp is not None and stamp.tzinfo is not None and stamp >= started_at:
+                return True
+        return False
 
     def observe_charging(self):
         """Notify only after HA reports charging power or (sensorless) ON.
@@ -212,6 +239,8 @@ class VehiclePushNotifications:
             started = runtime.started_at
             if started is None:
                 return
+            if not self._fresh_vehicle_feedback(started):
+                return
             key = f"manual:start:{started.isoformat()}"
             if self.emit(
                 key, "Geely manual charging started",
@@ -219,11 +248,14 @@ class VehiclePushNotifications:
                     "Manual", runtime.active_target, None,
                     getattr(runtime, "session_start_soc", None),
                     runtime._raw(runtime.battery),
+                    power_confirmed=real_power,
                 ),
             ):
                 self.active_starts.add(key)
         elif auto.owned and auto.stop_requested_at is None:
             if auto.owned_deadline is None:
+                return
+            if not self._fresh_vehicle_feedback(auto.started_at):
                 return
             key = f"automatic:start:{auto.owned_deadline.isoformat()}:{auto.owned_target}"
             if self.emit(
@@ -233,6 +265,7 @@ class VehiclePushNotifications:
                     auto.owned_target, auto.owned_deadline,
                     getattr(auto, "session_start_soc", None),
                     runtime._raw(runtime.battery),
+                    power_confirmed=real_power,
                 ),
             ):
                 self.active_starts.add(key)
