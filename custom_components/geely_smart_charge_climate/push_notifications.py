@@ -162,6 +162,16 @@ class VehiclePushNotifications:
             result[f"Independent climate slot {slot}"] = (
                 isinstance(settings, dict) and settings.get("enabled") is True
             )
+            result[f"Climate slot {slot} steering heat"] = (
+                isinstance(settings, dict)
+                and settings.get("steering_heat") is True
+            )
+        for profile in ("cool", "warm"):
+            settings = options.get(profile, {})
+            result[f"{profile.title()} steering heating preference"] = (
+                isinstance(settings, dict)
+                and bool(settings.get("steering_heat", False))
+            )
         return result
 
     def check_control_changes(self):
