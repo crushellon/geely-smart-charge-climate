@@ -24,6 +24,8 @@ for name in ("weekly_schedule", "climate_schedule", "charge_climate",
 win = sys.modules[f"{pkg.__name__}.climate_windows"]
 slots = sys.modules[f"{pkg.__name__}.climate_schedule"]
 linked = sys.modules[f"{pkg.__name__}.charge_climate"]
+comfort = sys.modules[f"{pkg.__name__}.comfort"]
+comfort_display = sys.modules[f"{pkg.__name__}.comfort_display"]
 
 clock = {"now": datetime(2026, 11, 21, 23, 50,
                          tzinfo=ZoneInfo("Australia/Brisbane"))}
@@ -171,6 +173,9 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         opts = linked.set_value(opts, "monday", "profile", "Cool")
         opts = linked.set_timing(opts, "lead_minutes", 20)
         opts = linked.set_timing(opts, "hold_minutes", 30)
+        opts = comfort.set_value(opts, "cool", "temperature", 16)
+        opts = comfort_display.set_seat_mode(opts, "cool", "driver", "Vent High")
+        opts = comfort_display.set_seat_mode(opts, "cool", "passenger", "Vent High")
         self.entry.options = opts
         await self.controller.async_tick()
         self.assertEqual(self.climate.calls, [])
@@ -179,7 +184,9 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.status, "RUNNING")
         self.assertEqual(self.controller.active["kind"], "linked")
         self.assertEqual([x[0] for x in self.climate.calls], ["on"])
-        self.assertEqual(self.climate.calls[0][1]["temperature"], 20)
+        self.assertEqual(self.climate.calls[0][1]["temperature"], 16)
+        self.assertEqual(self.climate.calls[0][1]["driver_seat"], "Vent High")
+        self.assertEqual(self.climate.calls[0][1]["passenger_seat"], "Vent High")
         clock["now"] = datetime(2026, 11, 23, 7, 29,
                                 tzinfo=ZoneInfo("Australia/Brisbane"))
         await self.controller.async_tick()
