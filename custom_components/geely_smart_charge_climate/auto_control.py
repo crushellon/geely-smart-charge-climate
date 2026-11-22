@@ -866,7 +866,12 @@ class AutomaticChargeController:
                         policy,
                     )
                     return
-                if self._soc() is not None and self._soc() < policy.target:
+                if (self._soc() is not None
+                        and (self._soc() < policy.target
+                             or (policy.target == 100
+                                 and self._confirmed_charge_power()))):
+                    # A real 100% balancing charge can already report 100%
+                    # before this controller adopts the in-window session.
                     if dt_util.now() >= policy.ready_by:
                         self._update("EXPIRED", "Ready-by deadline already passed", policy)
                         return
