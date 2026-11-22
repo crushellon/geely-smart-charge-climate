@@ -78,6 +78,8 @@ class FakeServices:
 
 class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        global now
+        now = datetime(2026, 11, 23, 6, tzinfo=ZoneInfo("Australia/Brisbane"))
         self.values = {
             "sensor.battery": "60",
             "switch.car": "off", "sensor.power": "0",
@@ -108,6 +110,137 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
             _notify=lambda: None,
         )
         self.auto = Auto(self.manual)
+
+    async def test_80_percent_hard_stop_at_exact_ready_by_even_below_target(self):
+        global now
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on"])
+        # A 9:30 ready-by is the actual end, not up to three hours later.
+        now = datetime(2026, 11, 23, 7, tzinfo=ZoneInfo("Australia/Brisbane"))
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.assertIn("ready-by deadline", self.auto.stop_context)
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
+        self.assertFalse(self.auto.owned)
+
+    async def test_old_morning_charge_cannot_restart_on_afternoon_plug(self):
+        global now
+        await self.auto.async_set_mode("Active")
+        now = datetime(2026, 11, 23, 7, tzinfo=ZoneInfo("Australia/Brisbane"))
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        # Real time has moved past the old STOP's bounded rebound window.
+        self.auto.stop_watch_until = env["dt_util"].utcnow() - timedelta(minutes=1)
+        now = datetime(2026, 11, 23, 18, 33,
+                       tzinfo=ZoneInfo("Australia/Brisbane"))
+        self.values["switch.car"] = "on"
+        self.values["sensor.power"] = "6.5"
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "CHECKING")
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.auto.unexpected_since = env["dt_util"].utcnow() - timedelta(seconds=40)
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off", "turn_off"])
+        self.assertIn("Unauthorised charging", self.auto.stop_context)
+
+    async def test_100_percent_never_starts_after_missed_deadline(self):
+        global now
+        self.entry.options["weekly_schedule"]["monday"] = {
+            "enabled": True, "target": 100, "ready_time": "09:30"
+        }
+        now = datetime(2026, 11, 23, 8, tzinfo=ZoneInfo("Australia/Brisbane"))
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, ["turn_on"])
+        # Geely never confirmed real power before 9:30.
+        self.values["switch.car"] = "off"
+        self.values["sensor.power"] = "0"
+        now = datetime(2026, 11, 23, 9, 30,
+                       tzinfo=ZoneInfo("Australia/Brisbane"))
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.assertFalse(self.auto.full_overrun_authorized)
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+
+    async def test_genuine_100_percent_session_can_balance_past_ready_by(self):
+        global now
+        self.entry.options["weekly_schedule"]["monday"] = {
+            "enabled": True, "target": 100, "ready_time": "09:30"
+        }
+        self.manual._save_options = lambda **vals: self.entry.options.update(vals)
+        now = datetime(2026, 11, 23, 8, tzinfo=ZoneInfo("Australia/Brisbane"))
+        await self.auto.async_set_mode("Active")
+        await self.auto.async_tick()  # Positive power BEFORE cutoff
+        self.assertTrue(self.auto.full_overrun_authorized)
+        self.assertTrue(self.entry.options["automatic_session"][
+            "full_overrun_authorized"
+        ])
+        now = datetime(2026, 11, 23, 10, 0,
+                       tzinfo=ZoneInfo("Australia/Brisbane"))
+        await self.auto.async_tick()
+        now = datetime(2026, 11, 23, 18, 33,
+                       tzinfo=ZoneInfo("Australia/Brisbane"))
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on"])
+        self.assertTrue(self.auto.owned)
+        # But unplugging ends the exception: it cannot be picked up tonight.
+        self.values["binary_sensor.plug"] = "off"
+        self.values["switch.car"] = "off"
+        self.values["sensor.power"] = "0"
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertIn("disconnected after ready-by", self.auto.stop_context)
+
+    async def test_restore_expired_80_percent_does_not_wait_for_recovery_grace(self):
+        global now
+        now = datetime(2026, 11, 23, 18, 33,
+                       tzinfo=ZoneInfo("Australia/Brisbane"))
+        self.entry.options["automatic_session"] = {
+            "active": True, "day": "monday", "target": 80,
+            "deadline": "2026-11-23T09:30:00+10:00",
+            "stop_pending": False,
+        }
+        await self.auto.async_restore()
+        self.assertTrue(self.auto.owned)
+        await self.auto.async_set_mode("Active", deliberate=False)
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+        self.assertEqual(self.services.calls, ["turn_off"])
+
+    async def test_restore_expired_100_without_proof_of_early_power_stops(self):
+        global now
+        now = datetime(2026, 11, 23, 18, 33,
+                       tzinfo=ZoneInfo("Australia/Brisbane"))
+        self.entry.options["automatic_session"] = {
+            "active": True, "day": "monday", "target": 100,
+            "deadline": "2026-11-23T09:30:00+10:00",
+            "full_overrun_authorized": False,
+        }
+        await self.auto.async_restore()
+        await self.auto.async_set_mode("Active", deliberate=False)
+        self.assertEqual(self.services.calls, ["turn_off"])
+        self.assertEqual(self.auto.status, "STOP_REQUESTED")
+
+    async def test_new_charge_inside_window_adopted_without_duplicate_start(self):
+        global now
+        self.values["binary_sensor.plug"] = "off"
+        await self.auto.async_set_mode("Active")
+        self.assertEqual(self.services.calls, [])
+        self.values["binary_sensor.plug"] = "on"
+        self.values["switch.car"] = "on"
+        self.values["sensor.power"] = "6.5"
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, [])
+        self.assertTrue(self.auto.owned)
+        self.assertEqual(self.auto.owned_target, 80)
+        self.assertIn("adopted", self.auto.message)
+        now = datetime(2026, 11, 23, 7, 0,
+                       tzinfo=ZoneInfo("Australia/Brisbane"))
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_off"])
 
     async def test_auto_running_session_persists_and_restores_without_second_start(self):
         self.manual._save_options = lambda **vals: self.entry.options.update(vals)
