@@ -792,21 +792,18 @@ class AutomaticChargeController:
                     self._update("BLOCKED", "Emergency stop active; starts suppressed")
                 return
 
-            # Charging that this integration did not start or restore is
-            # outside its authority. Geely can be charging manually across
-            # an integration update. Never issue an unsolicited OFF just
-            # because a weekly schedule says WAIT or STOP; the existing
-            # verified-stop rebound watchdog above still owns its cancellations.
+            # Preserve a vehicle session already active when HA restarted
+            # if the previous owner record could not be recovered. But do NOT
+            # grant blanket protection to new plug-in charging hours later.
+            # New observed charging must follow the schedule policy, so a
+            # missed morning appointment cannot charge through the afternoon.
             if (not self.manual.owned and self.stop_watch_until is None
-                    and (getattr(self.manual, "unmanaged_charge", False)
-                         or self._charging())):
-                if hasattr(self.manual, "unmanaged_charge"):
-                    self.manual.unmanaged_charge = True
+                    and getattr(self.manual, "unmanaged_charge", False)):
                 self.unexpected_since = None
                 self._update(
                     "EXTERNAL",
-                    "Vehicle charging observed; session origin unknown. "
-                    "Automatic schedule is waiting without commanding vehicle",
+                    "Charging was already present during integration startup; "
+                    "ownership unknown and not automatically interrupted",
                 )
                 return
 
@@ -834,6 +831,44 @@ class AutomaticChargeController:
                 self.unexpected_since = None
                 await self._request_start(policy)
                 return
+            if (policy.action == "AUTHORISED" and policy.ready_by is not None
+                    and policy.target is not None and self._charging()):
+                # A car/wallbox may start automatically on plug-in while a
+                # genuine scheduled window is open. Adopt the already-flowing
+                # charge WITHOUT issuing a second ON, then enforce target and
+                # ready-by using the normal owned-session logic.
+                key = self._deadline_key(policy)
+                self._rearm_if_requested(policy)
+                if key in self.finished_deadlines:
+                    self._update(
+                        "PAUSED", "Earlier session ended; Resume schedule required",
+                        policy,
+                    )
+                    return
+                if self._soc() is not None and self._soc() < policy.target:
+                    if dt_util.now() >= policy.ready_by:
+                        self._update("EXPIRED", "Ready-by deadline already passed", policy)
+                        return
+                    self.owned = True
+                    self.owned_target = policy.target
+                    self.owned_day = policy.day
+                    self.owned_deadline = policy.ready_by
+                    self.started_at = dt_util.utcnow()
+                    self.saw_charging = True
+                    self.full_overrun_authorized = (
+                        policy.target == 100 and self._confirmed_charge_power()
+                    )
+                    self.stop_watch_until = None
+                    if hasattr(self.manual, "stop_watch_until"):
+                        self.manual.stop_watch_until = None
+                    self._persist_session(True)
+                    self._update(
+                        "CHARGING",
+                        "Charging started during authorised schedule; "
+                        "adopted without duplicate START",
+                        policy,
+                    )
+                    return
             # A prior session can be finished even when the planner is
             # currently WAITing for a newly estimated start time. Keep the
             # actual outcome visible rather than replacing it with WAITING.
