@@ -71,15 +71,16 @@ class DummyScheduledClimate:
         self.status = "IDLE"
         self.message = "No schedule"
         self.active = None
+        self.events = []
 
     async def async_tick(self):
         return None
 
     async def async_manual_override(self, action):
-        return None
+        self.events.append(("override", action))
 
     async def async_manual_result(self, action, success):
-        return None
+        self.events.append(("result", action, success))
 
     async def async_shutdown(self):
         return None
@@ -178,6 +179,18 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         self.controller = LiveChargeController(hass, entry)
         self.states = states
         self.services = services
+
+    async def test_all_finished_manual_comfort_buttons_use_real_climate_path(self):
+        for action in ("Cool", "Warm", "custom", "off"):
+            with self.subTest(action=action):
+                await self.controller.async_manual_climate(action)
+                self.assertEqual(self.controller.climate.status, action)
+                self.assertEqual(
+                    self.controller.scheduled_climate.events[-2:],
+                    [("override", action), ("result", action, True)],
+                )
+        # The climate buttons must not send or interfere with charging commands.
+        self.assertEqual(self.services.calls, [])
 
     async def test_no_automatic_commands_when_disarmed(self):
         await self.controller.async_tick()
