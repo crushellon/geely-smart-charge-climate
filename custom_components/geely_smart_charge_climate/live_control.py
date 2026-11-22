@@ -379,6 +379,10 @@ class LiveChargeController:
             self.status = "BLOCKED"
             self.message = "Stop the active schedule and verify OFF before manual charging"
             self._notify()
+            self.push.emit(
+                fresh_event_id("manual-start-blocked-owned-auto"),
+                "Geely manual charge blocked", self.message,
+            )
             return
         if self.unmanaged_charge or self._vehicle_indicates_charging():
             self.status = "BLOCKED"
@@ -387,6 +391,10 @@ class LiveChargeController:
                 "before starting a new charge"
             )
             self._notify()
+            self.push.emit(
+                fresh_event_id("manual-start-blocked-observed"),
+                "Geely manual charge blocked", self.message,
+            )
             return
         if self.auto.mode != "Off":
             await self.auto.async_set_mode("Off")
@@ -423,8 +431,10 @@ class LiveChargeController:
         climate_entity = self.climate.entities.get("climate")
         reported = self._raw(climate_entity)
         expiry = self.scheduled_climate.manual_expires_at
-        duration = (f" Auto-OFF by {expiry.astimezone().strftime('%I:%M %p')}."
-                    if action != "off" and expiry is not None else "")
+        duration = (
+            f" Auto-OFF by {dt_util.as_local(expiry).strftime('%I:%M %p')}."
+            if action != "off" and expiry is not None else ""
+        )
         status = (
             "Vehicle reports climate ON" if reported not in (
                 None, "off", "unknown", "unavailable"
@@ -436,11 +446,25 @@ class LiveChargeController:
             "Cool": "Comfort Cool", "Warm": "Comfort Warm",
             "custom": "Custom cabin temperature", "off": "Climate and seats OFF",
         }.get(action, action)
+        options = self.entry.options
+        details = ""
+        if action in ("Cool", "Warm"):
+            profile = options.get(action.lower(), {})
+            details = (
+                f" Target {profile.get('temperature', 'configured')}°C;"
+                f" driver {profile.get('driver', 'configured')};"
+                f" passenger {profile.get('passenger', 'configured')};"
+                f" steering heat {'ON' if profile.get('steering_heat') else 'OFF'}."
+            )
+        elif action == "custom":
+            details = (
+                f" Target {options.get('manual_cabin_temperature', 22)}°C."
+            )
         self.push.emit(
             fresh_event_id(f"manual-climate-{action}"),
             f"Geely {label}",
             (f"{label}: {'command accepted' if success else 'command unconfirmed'}."
-             f" {status}.{duration}"),
+             f" {status}.{details}{duration}"),
         )
 
     async def async_resume_schedule(self):
@@ -448,11 +472,21 @@ class LiveChargeController:
         if self.owned or self.stop_requested_at is not None:
             self.message = "Stop manual charging and wait for verification first"
             self._notify()
+            self.push.emit(
+                fresh_event_id("resume-blocked-manual"),
+                "Geely schedule resume blocked", self.message,
+            )
             return
         await self.async_set_automatic_enabled(True)
         if self.auto.mode == "Active":
             await self.auto.async_request_resume()
         self._notify()
+        self.push.emit(
+            fresh_event_id("resume-schedule"),
+            "Geely automatic schedule resumed",
+            "Automatic schedule enabled. Charging will begin only when the "
+            "vehicle meets the actual scheduled start and safety conditions.",
+        )
 
     async def async_start(self):
         async with self._lock:
