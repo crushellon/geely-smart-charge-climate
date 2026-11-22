@@ -188,6 +188,17 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         await self.controller.async_tick()
         self.assertEqual(self.climate.calls, [("manual_off", None)])
 
+    async def test_real_deadline_callback_executes_without_waiting_for_periodic_tick(self):
+        await self.controller.async_manual_override("Cool")
+        alarm = alarm_events[-1]
+        clock["now"] = alarm["at"]
+        alarm["callback"](clock["now"])
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        self.assertEqual(self.climate.calls, [("manual_off", None)])
+        self.assertFalse(self.controller.manual_override)
+        self.assertIsNone(self.controller.manual_expires_at)
+
     async def test_each_manual_press_resets_the_30_minute_timer(self):
         start = clock["now"]
         await self.controller.async_manual_override("Cool")
