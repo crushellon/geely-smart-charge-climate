@@ -112,6 +112,7 @@ class DummyClimate:
     def __init__(self, hass, entry, notify):
         self.status = "IDLE"
         self.message = "No commands sent"
+        self.entities = {"climate": "climate.car"}
 
     async def apply(self, action):
         self.status = action
