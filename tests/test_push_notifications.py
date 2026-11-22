@@ -55,17 +55,27 @@ class NotificationTests(unittest.IsolatedAsyncioTestCase):
         warnings.clear()
         self.services = FakeServices()
         self.entry = SimpleNamespace(options={})
+        self.telemetry_time = now
+        self.states = SimpleNamespace(get=lambda entity: SimpleNamespace(
+            state="6.5",
+            last_reported=self.telemetry_time,
+        ))
         self.runtime = SimpleNamespace(
             hass=SimpleNamespace(
-                services=self.services, async_create_task=asyncio.create_task
+                services=self.services, states=self.states,
+                async_create_task=asyncio.create_task
             ),
             entry=self.entry,
-            charging_power="sensor.power", battery="sensor.soc",
+            charging_power="sensor.power",
+            charging_switch="switch.car",
+            wallbox_power="sensor.tesla_wall_connector_total_power",
+            battery="sensor.soc",
             owned=False, started_at=None, active_target=None,
             session_start_soc=None, stop_requested_at=None,
             auto=SimpleNamespace(
                 owned=False, owned_deadline=None, stop_requested_at=None,
-                owned_target=None, owned_day=None, session_start_soc=None
+                owned_target=None, owned_day=None, session_start_soc=None,
+                started_at=now
             ),
             vehicle_activity=lambda: ("STOPPED", 0.0),
             _wallbox_kw=lambda: None,
@@ -146,6 +156,20 @@ class NotificationTests(unittest.IsolatedAsyncioTestCase):
         await self.flush()
         self.assertEqual(self.services.calls, [])
         self.runtime.vehicle_activity = lambda: ("CHARGING", 6.6)
+        self.notifier.observe_charging()
+        await self.flush()
+        self.assertEqual(len(self.services.calls), 1)
+
+    async def test_stale_power_readback_cannot_generate_false_start(self):
+        self.runtime.owned = True
+        self.runtime.started_at = now
+        self.runtime.active_target = 80
+        self.runtime.vehicle_activity = lambda: ("CHARGING", 6.6)
+        self.telemetry_time = now.replace(hour=8)
+        self.notifier.observe_charging()
+        await self.flush()
+        self.assertEqual(self.services.calls, [])
+        self.telemetry_time = now
         self.notifier.observe_charging()
         await self.flush()
         self.assertEqual(len(self.services.calls), 1)
