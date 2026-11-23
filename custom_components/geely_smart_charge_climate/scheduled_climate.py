@@ -14,6 +14,7 @@ from homeassistant.util import dt as dt_util
 MANUAL_COMFORT_MAX = timedelta(minutes=30)
 MANUAL_OFF_RETRY = timedelta(seconds=60)
 MANUAL_OFF_MAX_ATTEMPTS = 3
+SCHEDULED_OFF_VERIFY = timedelta(seconds=90)
 
 from .climate_windows import candidate_windows
 
@@ -44,6 +45,10 @@ class ScheduledClimateController:
         self._manual_off_retry_at = None
         self._manual_off_attempts = 0
         self._manual_timer_unsub = None
+        pending = self.entry.options.get("climate_pending_stop_verification")
+        self._pending_stop_verification = (
+            pending if isinstance(pending, dict) and pending.get("deadline") else None
+        )
         self.suppressed_key = self.entry.options.get("climate_suppressed_occurrence")
         self.status = "RECOVERING" if self.active else "IDLE"
         self.message = (
@@ -163,9 +168,47 @@ class ScheduledClimateController:
                 manual_climate_timeout_error=None,
             )
 
+    def _verify_scheduled_stop(self, now):
+        """Silence successful scheduled OFF; alert after delayed cloud feedback.
+
+        Pending verification is persisted to survive an HA integration reload.
+        """
+        pending = self._pending_stop_verification
+        if not pending:
+            return
+        if self.manual_override or self.active:
+            self._pending_stop_verification = None
+            self._persist(climate_pending_stop_verification=None)
+            return
+        climate = self.manual.climate.entities.get("climate")
+        observed = self.manual._raw(climate)
+        if observed == "off":
+            self._pending_stop_verification = None
+            self._persist(climate_pending_stop_verification=None)
+            return
+        try:
+            deadline = datetime.fromisoformat(pending["deadline"])
+        except (ValueError, TypeError, KeyError):
+            deadline = now
+        if now < deadline:
+            return
+        self._pending_stop_verification = None
+        # Persist before warning to avoid duplicate alerts following restart.
+        self._persist(climate_pending_stop_verification=None)
+        notifier = getattr(self.manual, "push", None)
+        if notifier is not None:
+            notifier.climate_event(
+                key=pending["key"], action="off", kind=pending["kind"],
+                vehicle_state=observed, success=False,
+            )
+        self.status = "ERROR"
+        self.message = "Scheduled cabin OFF unconfirmed after 90 seconds; check car"
+        self.manual._notify()
+
     async def async_tick(self):
         async with self._lock:
             now = dt_util.now()
+            self._verify_scheduled_stop(now)
             emergency = (
                 self.entry.options.get("emergency_stop", False) is True
                 or self.manual._raw("input_boolean.ev_emergency_stop") == "on"
@@ -207,14 +250,17 @@ class ScheduledClimateController:
                     # never calls any Geely charging switch.
                     off_ok = await self.manual.climate.apply("off")
                     if off_ok:
-                        if hasattr(self.manual, "push"):
-                            self.manual.push.emit(
-                                f"manual:climate:timeout:{self.manual_expires_at}",
-                                "Geely manual comfort timed out",
-                                "30 minutes elapsed. Cabin, driver/passenger "
-                                "seats and steering-wheel OFF requests accepted; "
-                                "check Geely's actual climate state if needed.",
-                            )
+                        # A routine automatic timeout is quiet. Cloud success
+                        # does not prove the car turned OFF; verify telemetry.
+                        pending = {
+                            "key": f"manual-timeout:{self.manual_expires_at}",
+                            "kind": "manual timed-out",
+                            "deadline": (
+                                dt_util.now() + SCHEDULED_OFF_VERIFY
+                            ).isoformat(),
+                        }
+                        self._pending_stop_verification = pending
+                        self._persist(climate_pending_stop_verification=pending)
                         self.manual_override = False
                         self.manual_expires_at = None
                         self._manual_off_attempts = 0
@@ -338,7 +384,17 @@ class ScheduledClimateController:
                 # emergency interlock engaged. Never stop a manual override.
                 finished = dict(self.active)
                 success = await self.manual.climate.stop_scheduled()
-                self._push_climate("off", finished, success=success)
+                if not success:
+                    self._push_climate("off", finished, success=False)
+                else:
+                    pending = {
+                        "key": finished["key"], "kind": finished["kind"],
+                        "deadline": (
+                            dt_util.now() + SCHEDULED_OFF_VERIFY
+                        ).isoformat(),
+                    }
+                    self._pending_stop_verification = pending
+                    self._persist(climate_pending_stop_verification=pending)
                 old_key = self.active["key"]
                 self.active = None
                 self._mark_finished(old_key)
