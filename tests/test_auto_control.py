@@ -333,8 +333,7 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         await self.auto.async_tick()
         await self.auto.async_tick()
         await self.auto.async_tick()
-        self.assertEqual(self.auto.status, "STOP_REQUESTED")
-        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "STOPPED")
         await self.auto.async_tick()
         self.assertEqual(self.auto.status, "STOPPED")
 

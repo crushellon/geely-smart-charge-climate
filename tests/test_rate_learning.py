@@ -31,6 +31,14 @@ class RateLearningTests(unittest.TestCase):
         self.assertEqual(restored.samples, learner.samples)
         self.assertFalse(restored.active)
 
+    def test_short_switching_does_not_create_samples(self):
+        learner = RateLearner()
+        learner.observe(soc=42, charging=True, at=self.t)
+        learner.observe(soc=43, charging=False, at=self.t + timedelta(minutes=5))
+        learner.observe(soc=45, charging=True, at=self.t + timedelta(minutes=6))
+        learner.observe(soc=46, charging=False, at=self.t + timedelta(minutes=10))
+        self.assertEqual(learner.samples, [])
+
     def test_stop_breaks_session(self):
         learner = RateLearner()
         learner.observe(soc=40, charging=True, at=self.t)
