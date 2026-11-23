@@ -47,6 +47,7 @@ env = {"asyncio": asyncio, "datetime": datetime, "timedelta": timedelta,
        "MANUAL_COMFORT_MAX": timedelta(minutes=30),
        "MANUAL_OFF_RETRY": timedelta(seconds=60),
        "MANUAL_OFF_MAX_ATTEMPTS": 3,
+       "SCHEDULED_OFF_VERIFY": timedelta(seconds=90),
        "async_track_point_in_time": schedule_exact}
 exec(compile(ast.Module(body=[cls], type_ignores=[]), "scheduled_climate.py", "exec"), env)
 Controller = env["ScheduledClimateController"]
@@ -132,7 +133,7 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         await self.controller.async_tick()
         self.assertEqual(self.controller.status, "DISABLED")
 
-    async def test_scheduled_climate_pushes_once_on_start_and_stop(self):
+    async def test_scheduled_climate_pushes_start_and_quiet_verified_off(self):
         self.configure_independent()
         await self.controller.async_tick()
         climate_events = [v[1] for v in self.push.events if v[0] == "climate"]
@@ -147,20 +148,45 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         clock["now"] += timedelta(minutes=36)
         await self.controller.async_tick()
         climate_events = [v[1] for v in self.push.events if v[0] == "climate"]
-        self.assertEqual([v["action"] for v in climate_events], ["on", "off"])
-        self.assertTrue(climate_events[1]["success"])
+        self.assertEqual([v["action"] for v in climate_events], ["on"])
+        self.assertIsNotNone(self.controller._pending_stop_verification)
+        await self.controller.async_tick()
+        self.assertIsNone(self.controller._pending_stop_verification)
 
-    async def test_manual_30_minute_auto_off_generates_phone_push(self):
+    async def test_off_warning_only_after_delayed_non_off_feedback(self):
+        self.configure_independent()
+        state = {"value": "heat_cool"}
+        self.manual._raw = lambda entity: (
+            state["value"] if entity == "climate.car" else "off"
+        )
+        await self.controller.async_tick()
+        clock["now"] += timedelta(minutes=36)
+        await self.controller.async_tick()
+        self.assertIsNotNone(self.controller._pending_stop_verification)
+        clock["now"] += timedelta(seconds=89)
+        await self.controller.async_tick()
+        self.assertEqual([v[1]["action"] for v in self.push.events
+                          if v[0] == "climate"], ["on"])
+        clock["now"] += timedelta(seconds=2)
+        await self.controller.async_tick()
+        self.assertEqual([v[1]["action"] for v in self.push.events
+                          if v[0] == "climate"], ["on", "off"])
+        self.assertFalse(self.push.events[-1][1]["success"])
+        await self.controller.async_tick()
+        self.assertEqual(len([v for v in self.push.events
+                              if v[0] == "climate" and v[1]["action"] == "off"]), 1)
+
+    async def test_manual_30_minute_auto_off_is_silent_on_success(self):
         await self.controller.async_manual_override("Cool")
         clock["now"] += timedelta(minutes=30)
         await self.controller.async_tick()
         notices = [event for event in self.push.events if event[0] == "push"]
-        self.assertEqual(len(notices), 1)
-        self.assertIn("timed out", notices[0][2])
+        self.assertEqual(len(notices), 0)
+        self.assertIsNotNone(self.controller._pending_stop_verification)
         await self.controller.async_tick()
         self.assertEqual(len([
             event for event in self.push.events if event[0] == "push"
-        ]), 1)
+        ]), 0)
 
     async def test_independent_start_once_and_stop_after_hold(self):
         self.configure_independent()

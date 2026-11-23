@@ -203,7 +203,8 @@ class NotificationTests(unittest.IsolatedAsyncioTestCase):
         await self.flush()
         message = self.services.calls[0][2]["message"]
         self.assertIn("Target not reached", message)
-        self.assertIn("kWh (SoC-based)", message)
+        self.assertIn("~26.0 kWh added", message)
+        self.assertLess(len(message), 135)
 
     async def test_99_percent_geely_balance_does_not_claim_verified_100(self):
         self.notifier.charging_ended(
@@ -247,9 +248,32 @@ class NotificationTests(unittest.IsolatedAsyncioTestCase):
             kind="linked", vehicle_state="off", success=True
         )
         await self.flush()
-        self.assertEqual(len(self.services.calls), 2)
+        self.assertEqual(len(self.services.calls), 1)
         self.assertIn("feedback pending", self.services.calls[0][2]["message"])
-        self.assertIn("Geely climate reports OFF", self.services.calls[1][2]["message"])
+
+
+    async def test_100_percent_finish_is_short_and_identifies_geely(self):
+        self.notifier.charging_ended(
+            automatic=True, session_id="Mon100", start_soc=42, end_soc=100,
+            target=100, status="COMPLETED",
+            reason="Geely ended the full charge balancing session",
+        )
+        await self.flush()
+        notice = self.services.calls[0][2]
+        self.assertIn("42% → 100%", notice["message"])
+        self.assertIn("Target reached", notice["message"])
+        self.assertIn("Ended by Geely", notice["message"])
+        self.assertLess(len(notice["message"]), 135)
+
+    async def test_scheduled_climate_off_failure_alerts_once(self):
+        for _ in range(2):
+            self.notifier.climate_event(
+                key="Monday", action="off", kind="linked",
+                vehicle_state="heat_cool", success=False,
+            )
+        await self.flush()
+        self.assertEqual(len(self.services.calls), 1)
+        self.assertIn("OFF not confirmed", self.services.calls[0][2]["message"])
 
 
 if __name__ == "__main__":

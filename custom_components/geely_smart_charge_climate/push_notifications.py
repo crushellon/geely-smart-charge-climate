@@ -302,11 +302,7 @@ class VehiclePushNotifications:
         """Emit only after a controller has read STOP or verified cancellation."""
         name = "Automatic" if automatic else "Manual"
         gain = battery_energy(start_soc, end_soc)
-        energy = (
-            f" Estimated battery energy added: {gain:.1f} kWh (SoC-based)."
-            if gain is not None else
-            " Energy added unavailable (missing SoC telemetry)."
-        )
+        energy = f" · ~{gain:.1f} kWh added" if gain is not None else ""
         actual = valid_soc(end_soc)
         wanted = valid_soc(target)
         achieved = actual is not None and wanted is not None and actual >= wanted
@@ -319,18 +315,19 @@ class VehiclePushNotifications:
             "Target not reached" if status in ("STOPPED", "COMPLETED", "INTERRUPTED")
             else "Control released; vehicle stop not confirmed"
         )
-        message = (
-            f"{name} charging {status.lower()}. {outcome}. "
-            f"Battery {percent(start_soc)} → {percent(end_soc)}; "
-            f"target {percent(target)}."
-            + (f" Ready by {time_label(ready_by)}." if ready_by else "")
-            + energy + f" Reason: {reason}."
-        )
-        self.emit(
-            f"{name.lower()}:end:{session_id}:{status}",
-            f"Geely {name.lower()} charging {status.lower()}",
-            message,
-        )
+        # Put the complete outcome in a short iPhone lock-screen message.
+        # Detailed reason/ready-by remains in the HA controller history.
+        if "geely" in str(reason).lower():
+            cause = " · Ended by Geely"
+        elif "deadline" in str(reason).lower() or "ready-by" in str(reason).lower():
+            cause = " · Deadline"
+        else:
+            cause = ""
+        title = (f"Geely {name.lower()} charge complete" if achieved
+                 else f"Geely {name.lower()} charge ended")
+        message = (f"{percent(start_soc)} → {percent(end_soc)} · "
+                   f"{outcome} (target {percent(target)}){energy}{cause}")
+        self.emit(f"{name.lower()}:end:{session_id}:{status}", title, message)
 
     def climate_event(self, *, key, action, kind, setting=None, time=None,
                       vehicle_state=None, success=True):
@@ -341,12 +338,12 @@ class VehiclePushNotifications:
             else "Climate command accepted; vehicle feedback pending"
         )
         if action == "off":
-            requested = (
-                "Geely climate reports OFF"
-                if vehicle_state == "off"
-                else "OFF command sent; vehicle feedback pending"
-            )
-        if not success:
+            # The scheduler verifies the reported OFF separately. Routine
+            # success is silent; this method is called on failed verification.
+            if success:
+                return
+            requested = "OFF not confirmed; check the vehicle"
+        elif not success:
             requested = "Geely climate command failed; check vehicle"
         label = "started" if action == "on" else "stopped"
         details = (
