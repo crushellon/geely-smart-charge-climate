@@ -65,6 +65,7 @@ class RateLearner:
         self.anchor_soc, self.anchor_at = soc, at
         if not (0 < rate <= 40):
             return False
+        # A single distorted Geely update cannot skew the moving median.
         self.samples.append(rate)
         del self.samples[:-MAX_SAMPLES]
         return True

@@ -325,20 +325,24 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.manual.stop_watch_until)
         self.assertEqual(self.services.calls, ["turn_on"])
 
-    async def test_optional_wallbox_power_prevents_false_automatic_stop(self):
-        self.manual._wallbox_kw = lambda: 0.0
+    async def test_optional_wallbox_power_never_changes_stop_decision(self):
         await self.auto.async_set_mode("Active")
-        # The wallbox is now flowing, and may lag the Geely OFF response.
+        # Unrelated charger may still report high idle or stale power.
         self.manual._wallbox_kw = lambda: 6.89
         self.values["sensor.battery"] = "80"
         await self.auto.async_tick()
         await self.auto.async_tick()
         await self.auto.async_tick()
         self.assertEqual(self.auto.status, "STOP_REQUESTED")
-        self.manual._wallbox_kw = lambda: 0.0
         await self.auto.async_tick()
         await self.auto.async_tick()
         self.assertEqual(self.auto.status, "STOPPED")
+
+    async def test_optional_wallbox_cannot_claim_charging_when_geely_is_off(self):
+        self.manual._wallbox_kw = lambda: 6.89
+        self.assertFalse(self.auto._charging())
+        self.assertFalse(self.auto._confirmed_charge_power())
+        self.assertFalse(self.auto._stopped())
 
     async def test_immediate_off_does_not_verify_before_settling(self):
         # Reproduces START -> Off within moments, when cloud feedback is not

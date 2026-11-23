@@ -133,7 +133,9 @@ class GeelySimulationSensor(GeelyObservedBase):
         self._attr_unique_id = f"{entry.entry_id}_simulation_decision"
         self._rated_kw = float(entry.data.get(CONF_CHARGER_RATED_KW, DEFAULT_CHARGER_RATED_KW))
         self._learner = RateLearner()
-        self._store = Store(hass, 1, f"{DOMAIN}_{entry.entry_id}_rate_learning")
+        # Deliberately start with clean learning data after removal of
+        # test-cycle/idle-power contamination. Legacy v1 samples are ignored.
+        self._store = Store(hass, 1, f"{DOMAIN}_{entry.entry_id}_rate_learning_geely_v2")
 
     def _result(self):
         now = dt_util.now()
@@ -190,6 +192,8 @@ class GeelySimulationSensor(GeelyObservedBase):
             "target_percent": plan.target if plan else None,
             "ready_time": plan.ready_by.strftime("%H:%M") if plan else None,
             "charger_rated_kw": self._rated_kw,
+            "learning_data_generation": "geely_v2",
+            "learning_power_source": self._power if self._power else "Geely switch only",
             "charge_rate_source": "learned" if self._learner.learned_rate is not None else "initial_estimate",
             "learned_percentage_points_per_hour": self._learner.learned_rate,
             "learning_sample_count": len(self._learner.samples),
@@ -218,7 +222,8 @@ class GeelySimulationSensor(GeelyObservedBase):
             if self._power:
                 power_state = self.hass.states.get(self._power)
                 try:
-                    charge_active = charge_active and power_state is not None and float(power_state.state) > 0
+                    charge_active = (charge_active and power_state is not None
+                                     and float(power_state.state) >= 1.0)
                 except (ValueError, TypeError):
                     charge_active = False
             battery_state = self.hass.states.get(self._battery)
@@ -551,17 +556,11 @@ class VehicleChargingStatusSensor(GeelyObservedBase):
             runtime._raw(runtime.charging_switch),
             runtime._raw(runtime.charging_power),
         )
-        wallbox_source = (
-            activity == "CHARGING" and geely_activity != "CHARGING"
-        )
         return {
             "geely_charging_switch": runtime._raw(runtime.charging_switch),
             "geely_power_kw": geely_power,
-            "wallbox_power_kw": (
-                power if wallbox_source else None
-            ),
-            "source": ("Tesla Wall Connector (optional, read-only)"
-                       if wallbox_source else "Geely charging power"
+            "wallbox_power_kw": runtime._wallbox_kw(),
+            "source": ("Geely charging power"
                        if activity == "CHARGING" else "Geely charging switch"
                        if activity == "CHARGING_REPORTED" else "Geely telemetry"),
             "attribution": (

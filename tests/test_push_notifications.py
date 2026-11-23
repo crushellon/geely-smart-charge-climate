@@ -88,6 +88,15 @@ class NotificationTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(4):
             await asyncio.sleep(0)
 
+    async def test_stale_wallbox_cannot_confirm_geely_charge_start(self):
+        self.runtime.wallbox_power = "sensor.tesla_wall_connector_total_power"
+        self.runtime._wallbox_kw = lambda: 6.5
+        self.states.get = lambda entity: SimpleNamespace(
+            state="6.5" if entity == self.runtime.wallbox_power else "0",
+            last_reported=self.telemetry_time,
+        )
+        self.assertFalse(self.notifier._fresh_vehicle_feedback(now))
+
     async def test_calls_real_iphone_mobile_app_service_not_inbox(self):
         self.assertTrue(self.notifier.emit(
             "session:1", "Geely started", "41% to 100% by 07:00"
