@@ -108,26 +108,19 @@ class AutomaticChargeController:
             return None
 
     def _confirmed_charge_power(self):
-        """Positive Geely or optional read-only wallbox power, not switch ON alone."""
+        """Only Geely telemetry can confirm charging; wallbox is display-only."""
         power = self._power()
-        wallbox = (self.manual._wallbox_kw()
-                   if hasattr(self.manual, "_wallbox_kw") else None)
-        if ((power is not None and power > 0.25)
-                or (wallbox is not None and wallbox > 0.25)):
+        if power is not None and power > 0.25:
             return True
-        # Preserve Geely-only installations without a power sensor.
-        # A reported ON is the best available active-session evidence there,
-        # but never prefer it over a configured sensor actually reporting 0.
-        return (not self.manual.charging_power and wallbox is None
+        # A configured but non-positive Geely power reading is not proof
+        # of charging. Without a power sensor, use Geely's own ON state.
+        return (not self.manual.charging_power
                 and self._raw(self.manual.charging_switch) == "on")
 
     def _charging(self):
         state = self._raw(self.manual.charging_switch)
         power = self._power()
-        wallbox = (self.manual._wallbox_kw()
-                   if hasattr(self.manual, "_wallbox_kw") else None)
-        return (state == "on" or (power is not None and power > 0.25)
-                or (wallbox is not None and wallbox > 0.25))
+        return state == "on" or (power is not None and power > 0.25)
 
     def _stop_telemetry_fresh(self):
         """Never verify STOP using cached states from before the command.
@@ -154,15 +147,11 @@ class AutomaticChargeController:
 
     def _stopped(self):
         power = self._power()
-        wallbox = (self.manual._wallbox_kw()
-                   if hasattr(self.manual, "_wallbox_kw") else None)
-        # Geely OFF/0 is not physical proof when an optional wallbox still
-        # reports charging. This is corroboration only, not a requirement.
+        # Geely state is the sole stop authority. No wallbox-dependent policy.
         return (
             self._stop_telemetry_fresh()
             and self._raw(self.manual.charging_switch) == "off"
             and (power is None or power <= 0.25)
-            and (wallbox is None or wallbox <= 0.25)
         )
 
     def _legacy_clear(self):
@@ -744,7 +733,7 @@ class AutomaticChargeController:
                         )
                         return
                 if self._recovery_started_at is not None:
-                    # Cloud switch telemetry often lags actual wallbox power.
+                    # Cloud switch telemetry can lag the actual vehicle state.
                     # Hold the previous ownership for a bounded grace period
                     # instead of issuing duplicate START or a false STOP.
                     if self._charging():
@@ -892,7 +881,7 @@ class AutomaticChargeController:
                 return
             if (policy.action == "AUTHORISED" and policy.ready_by is not None
                     and policy.target is not None and self._charging()):
-                # A car/wallbox may start automatically on plug-in while a
+                # A car may start automatically on plug-in while a
                 # genuine scheduled window is open. Adopt the already-flowing
                 # charge WITHOUT issuing a second ON, then enforce target and
                 # ready-by using the normal owned-session logic.

@@ -211,8 +211,8 @@ class VehiclePushNotifications:
     def _fresh_vehicle_feedback(self, started_at):
         """Positive power must come from the SAME freshly reported sensor.
 
-        A new Geely 0 kW report cannot make stale Tesla 6 kW valid.
-        If neither power sensor exists, Geely switch ON is the fallback.
+        Only the Geely charging power sensor counts. If no Geely power
+        sensor is configured, use its charging switch as fallback.
         """
         if started_at is None or not hasattr(self.hass, "states"):
             return False
@@ -225,10 +225,7 @@ class VehiclePushNotifications:
             return (isinstance(stamp, datetime) and stamp.tzinfo is not None
                     and stamp >= started_at)
 
-        for entity in (
-            self.runtime.charging_power,
-            getattr(self.runtime, "wallbox_power", None),
-        ):
+        for entity in (self.runtime.charging_power,):
             if not entity:
                 continue
             state = self.hass.states.get(entity)
@@ -241,8 +238,7 @@ class VehiclePushNotifications:
             except (ValueError, TypeError):
                 pass
 
-        if (self.runtime.charging_power is None
-                and self.runtime._wallbox_kw() is None):
+        if self.runtime.charging_power is None:
             switch = self.hass.states.get(self.runtime.charging_switch)
             return fresh(switch) and switch.state == "on"
         return False
@@ -257,7 +253,7 @@ class VehiclePushNotifications:
         real_power = activity == "CHARGING"
         fallback = (
             activity == "CHARGING_REPORTED" and
-            runtime.charging_power is None and runtime._wallbox_kw() is None
+            runtime.charging_power is None
         )
         if not (real_power or fallback):
             return

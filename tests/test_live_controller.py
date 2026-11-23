@@ -345,20 +345,19 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.auto.mode, "Off")
         self.assertEqual(self.services.calls, [])
 
-    async def test_wallbox_power_prevents_false_manual_stop_confirmation(self):
+    async def test_wallbox_power_does_not_affect_manual_stop_confirmation(self):
         self.states.data["sensor.tesla_wall_connector_total_power"] = SimpleNamespace(
             state="0"
         )
         await self.controller.async_set_target(80)
         await self.controller.async_start_manual()
-        # Real wallbox power remains despite Geely OFF/0 cloud reports.
+        # Geely OFF/0 is authoritative even if charger reports stale power.
         self.states.data["sensor.tesla_wall_connector_total_power"].state = "6.89"
         await self.controller.async_stop()
         await self.controller.async_tick()
         await self.controller.async_tick()
-        self.assertEqual(self.controller.status, "STOP_REQUESTED")
+        self.assertEqual(self.controller.status, "STOPPED")
         self.states.data["sensor.tesla_wall_connector_total_power"].state = "0.0"
-        await self.controller.async_tick()
         await self.controller.async_tick()
         self.assertEqual(self.controller.status, "STOPPED")
 
