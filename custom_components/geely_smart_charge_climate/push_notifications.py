@@ -295,7 +295,9 @@ class VehiclePushNotifications:
 
     def charging_ended(self, *, automatic, session_id, start_soc, end_soc,
                        target, status, reason, ready_by=None):
-        """Emit only after a controller has read STOP or verified cancellation."""
+        """One concise phone summary after observed session termination."""
+        if status not in ("STOPPED", "COMPLETED", "INTERRUPTED"):
+            return
         name = "Automatic" if automatic else "Manual"
         gain = battery_energy(start_soc, end_soc)
         energy = f" · ~{gain:.1f} kWh added" if gain is not None else ""
@@ -313,17 +315,20 @@ class VehiclePushNotifications:
         )
         # Put the complete outcome in a short iPhone lock-screen message.
         # Detailed reason/ready-by remains in the HA controller history.
-        if "geely" in str(reason).lower():
+        reason_text = str(reason).lower()
+        if ("geely finished" in reason_text or "geely ended" in reason_text
+                or "geely stopped" in reason_text):
             cause = " · Ended by Geely"
         elif "deadline" in str(reason).lower() or "ready-by" in str(reason).lower():
             cause = " · Deadline"
         else:
             cause = ""
-        title = (f"Geely {name.lower()} charge complete" if achieved
+        title = (f"Geely {name.lower()} charge finished" if achieved
                  else f"Geely {name.lower()} charge ended")
+        target_detail = outcome if achieved else f"{outcome} (target {percent(target)})"
         message = (f"{percent(start_soc)} → {percent(end_soc)} · "
-                   f"{outcome} (target {percent(target)}){energy}{cause}")
-        self.emit(f"{name.lower()}:end:{session_id}:{status}", title, message)
+                   f"{target_detail}{energy}{cause}")
+        self.emit(f"{name.lower()}:end:{session_id}", title, message)
 
     def climate_event(self, *, key, action, kind, setting=None, time=None,
                       vehicle_state=None, success=True):

@@ -169,21 +169,14 @@ class AutomaticChargeController:
             return
         self._last_notification = event
         self.last_event = message
-        # Keep the old Home Assistant notification and event bus for History;
-        # push actionable failures/warnings to the iPhone separately.
-        if (hasattr(self.manual, "push")
-                and (code in ("error", "unexpected", "interrupted")
-                     or (code == "stop_requested" and self.stop_attempts == 1)
-                     or (code == "stop_verified" and not self._last_release_owned))):
+        # Intermediate request/check/retry events remain in HA History.
+        # Owned sessions send their single outcome via charging_ended().
+        # An unowned stop has no session summary, so its sole success push
+        # is emitted separately after fresh OFF verification.
+        if hasattr(self.manual, "push") and code == "error":
             self.manual.push.emit(
-                f"auto:alert:{code}:{message}:{self.owned_deadline}",
-                "Geely charging stop verified" if code == "stop_verified"
-                else "Geely charging warning" if code != "stop_requested"
-                else "Geely charging stop requested",
-                (f"{message}. " +
-                 ("Charging OFF has not yet been verified."
-                  if code in ("stop_requested", "error") else
-                  "Check the actual vehicle charging state.")),
+                f"auto:alert:{code}:{message}:{self.owned_deadline}:{self.stop_started_at}",
+                "Geely charging warning", message + ". Check vehicle.",
             )
         try:
             persistent_notification.async_create(
@@ -512,20 +505,22 @@ class AutomaticChargeController:
         except Exception as exc:
             _LOGGER.exception("Automatic stop service failed")
             self._update("ERROR", f"Stop error: {type(exc).__name__}; verify in vehicle")
-            self._notice("error", "Automatic stop failed; verify charging directly")
+            # Retain the failure in HA; the stop watchdog can still recover.
+            self._notice("stop_service_error", "Automatic stop request failed; retrying")
 
     def _release(self, state, message):
         self._last_release_owned = self.owned
         if self.owned and self.owned_day and self.owned_deadline:
             if hasattr(self.manual, "push"):
-                self.manual.push.charging_ended(
-                    automatic=True,
-                    session_id=self.owned_deadline.isoformat(),
-                    start_soc=self.session_start_soc,
-                    end_soc=self._soc(), target=self.owned_target,
-                    status=state, reason=message,
-                    ready_by=self.owned_deadline,
-                )
+                if state in ("STOPPED", "COMPLETED", "INTERRUPTED"):
+                    self.manual.push.charging_ended(
+                        automatic=True,
+                        session_id=(self.started_at or self.owned_deadline).isoformat(),
+                        start_soc=self.session_start_soc,
+                        end_soc=self._soc(), target=self.owned_target,
+                        status=state, reason=message,
+                        ready_by=self.owned_deadline,
+                    )
             soc = self._soc()
             reached_target = (
                 state == "COMPLETED"
@@ -695,7 +690,17 @@ class AutomaticChargeController:
                 if (self.off_checks >= 2 and self.stop_started_at is not None
                         and dt_util.utcnow() - self.stop_started_at >= STOP_SETTLE):
                     context = self.stop_context
+                    stopped_id = self.stop_started_at.isoformat()
+                    unowned = not self.owned
                     self._release("STOPPED", f"Verified charging stopped: {context}")
+                    if unowned and hasattr(self.manual, "push"):
+                        self.manual.push.emit(
+                            f"auto:unowned:ended:{stopped_id}",
+                            "Geely charging stopped",
+                            "Outside scheduled charging window."
+                            if "Unauthorised charging" in context else
+                            "Charging has stopped.",
+                        )
                     self._notice("stop_verified", f"Charging stopped and verified: {context}")
                     return
                 elapsed = dt_util.utcnow() - self.stop_requested_at
@@ -708,9 +713,12 @@ class AutomaticChargeController:
                         return
                     if self.stop_attempts < 3:
                         await self._request_stop("Retrying unconfirmed stop")
-                    else:
+                    elif (self.stop_started_at is not None
+                          and dt_util.utcnow() - self.stop_started_at >= timedelta(minutes=5)):
                         self._update("ERROR", "Stop not verified; check vehicle immediately")
-                        self._notice("error", "Automatic stop remains unconfirmed")
+                        self._notice("error", "Charging may still be active; OFF not reported after 5 minutes")
+                    else:
+                        self._update("STOP_REQUESTED", "STOP sent; waiting for fresh Geely OFF telemetry")
                 return
 
             if self.owned:

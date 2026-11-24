@@ -651,17 +651,13 @@ class LiveChargeController:
             self.status = "ERROR"
             self.message = f"Stop service error: {type(exc).__name__}; verify in car"
             self._notify()
-            self.push.emit(
-                f"manual:stop-service-error:{self.started_at}:{self.stop_attempts}",
-                "Geely manual STOP error",
-                "Geely stop request failed; the car may still be charging. "
-                "Check charging power and stop directly in the vehicle if needed.",
-            )
+            # Do not push intermediate failures; the watchdog retries and
+            # sends a single actionable warning if OFF remains unconfirmed.
             return  # Keep ownership and allow another explicit stop.
 
     def _finish(self, status, message):
         """Finish only after vehicle state indicates charging has stopped."""
-        if self.started_at is not None:
+        if self.started_at is not None and status in ("STOPPED", "COMPLETED", "INTERRUPTED"):
             self.push.charging_ended(
                 automatic=False, session_id=self.started_at.isoformat(),
                 start_soc=self.session_start_soc, end_soc=self._raw(self.battery),
@@ -727,15 +723,13 @@ class LiveChargeController:
         if self.owned:
             async with self._lock:
                 await self._stop_locked("User requested manual stop")
-            requested = self.stop_requested_at is not None
-            self.push.emit(
-                fresh_event_id("manual-stop-requested"),
-                "Geely manual charging STOP requested" if requested
-                else "Geely manual STOP blocked",
-                "STOP request issued; waiting for charging OFF/zero power."
-                if requested else
-                "Public charging mode prevented a vehicle STOP command.",
-            )
+            # The completed-session push is emitted only after OFF is observed.
+            if self.public_mode():
+                self.push.emit(
+                    fresh_event_id("manual-stop-blocked"),
+                    "Geely manual STOP blocked",
+                    "Public charging mode prevented a vehicle STOP command.",
+                )
             return
         if self.public_mode():
             self.status = "BLOCKED"
@@ -758,11 +752,7 @@ class LiveChargeController:
             self.status = "STOP_REQUESTED"
             self.message = "Stopping observed charge; waiting for Geely verification"
             self._notify()
-            self.push.emit(
-                fresh_event_id("manual-stop-observed"),
-                "Geely observed charging STOP requested",
-                "Stopping the existing home charge; awaiting verified OFF/zero power.",
-            )
+            # The automatic stop path emits the single final stopped push.
             return
         self.status = "IDLE"
         self.message = "No charge detected to stop"
@@ -818,16 +808,20 @@ class LiveChargeController:
                         return
                     if self.stop_attempts < 3:
                         await self._stop_locked("Retrying stop confirmation")
-                    else:
+                    elif (self.stop_started_at is not None
+                          and dt_util.utcnow() - self.stop_started_at >= timedelta(minutes=5)):
                         self.status = "ERROR"
-                        self.message = "Stop unconfirmed after 3 attempts: verify in car"
+                        self.message = "Stop unconfirmed after 5 minutes: verify in car"
                         self._notify()
                         self.push.emit(
                             f"manual:stop-unconfirmed:{self.started_at}",
-                            "Geely manual STOP unconfirmed",
-                            "Home Assistant could not verify the vehicle stopped "
-                            "after three tries. Check charging power immediately.",
+                            "Geely charging warning",
+                            "Charging may still be active; OFF not reported after 5 minutes. Check vehicle.",
                         )
+                    else:
+                        self.status = "STOP_REQUESTED"
+                        self.message = "STOP sent; waiting for fresh Geely OFF telemetry"
+                        self._notify()
                 return
 
             if (self.entry.options.get("emergency_stop", False) is True

@@ -261,6 +261,30 @@ class NotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("feedback pending", self.services.calls[0][2]["message"])
 
 
+    async def test_normal_80_finish_single_push_and_no_false_geely_attribution(self):
+        for status in ("STOPPED", "COMPLETED"):
+            self.notifier.charging_ended(
+                automatic=True, session_id="normal-80", start_soc=42,
+                end_soc=80, target=80, status=status,
+                reason="Verified charging stopped: Scheduled battery target reached",
+            )
+        await self.flush()
+        self.assertEqual(len(self.services.calls), 1)
+        notice = self.services.calls[0][2]
+        self.assertIn("finished", notice["title"])
+        self.assertIn("42% → 80%", notice["message"])
+        self.assertNotIn("verified", notice["message"].lower())
+        self.assertNotIn("Ended by Geely", notice["message"])
+
+    async def test_unconfirmed_public_release_is_not_completion(self):
+        self.notifier.charging_ended(
+            automatic=True, session_id="released", start_soc=42,
+            end_soc=80, target=80, status="BLOCKED",
+            reason="Public mode enabled; session released",
+        )
+        await self.flush()
+        self.assertEqual(len(self.services.calls), 0)
+
     async def test_100_percent_finish_is_short_and_identifies_geely(self):
         self.notifier.charging_ended(
             automatic=True, session_id="Mon100", start_soc=42, end_soc=100,
