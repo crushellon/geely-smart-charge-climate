@@ -339,6 +339,54 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         # normal tick; stale wallbox power must not prevent either outcome.
         self.assertIn(self.auto.status, ("STOPPED", "COMPLETED"))
 
+    async def test_dedicated_charger_can_stop_before_geely_plug_updates(self):
+        global now
+        now = datetime(2026, 11, 22, 20, tzinfo=ZoneInfo("Australia/Brisbane"))
+        self.values["binary_sensor.plug"] = "off"
+        self.manual.assisted_charging = lambda: True
+        self.auto.mode = "Active"
+        await self.auto.async_tick()
+        self.assertEqual(self.auto.status, "CHECKING")
+        self.auto.unexpected_since -= timedelta(seconds=31)
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_off"])
+        self.assertIn("charger-assisted", self.auto.stop_context)
+        self.assertFalse(self.auto._stopped())
+        self.manual.assisted_charging = lambda: False
+        self.assertTrue(self.auto._stopped())
+
+    async def test_dedicated_charger_does_not_override_public_mode(self):
+        self.manual.assisted_charging = lambda: True
+        self.entry.options["public_charging_mode"] = True
+        self.auto.mode = "Active"
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, [])
+
+    async def test_dedicated_charger_does_not_start_or_adopt_with_stale_plug(self):
+        self.manual.assisted_charging = lambda: True
+        self.values["binary_sensor.plug"] = "off"
+        self.auto.mode = "Active"
+        await self.auto.async_tick()
+        # 06:00 is inside the configured Monday window. Wallbox power alone
+        # cannot authorize START or ownership, nor request STOP in-window.
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, [])
+        self.assertFalse(self.auto.owned)
+        self.assertIsNone(self.auto.unexpected_since)
+
+    async def test_dedicated_charger_cannot_stop_manual_or_disabled_controller(self):
+        global now
+        now = datetime(2026, 11, 22, 20, tzinfo=ZoneInfo("Australia/Brisbane"))
+        self.values["binary_sensor.plug"] = "off"
+        self.manual.assisted_charging = lambda: True
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, [])
+        self.auto.mode = "Active"
+        self.manual.owned = True
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, [])
+        self.assertIsNone(self.auto.unexpected_since)
+
     async def test_optional_wallbox_cannot_claim_charging_when_geely_is_off(self):
         self.manual._wallbox_kw = lambda: 6.89
         self.assertFalse(self.auto._charging())

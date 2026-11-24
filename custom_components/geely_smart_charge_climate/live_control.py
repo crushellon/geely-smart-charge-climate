@@ -46,9 +46,8 @@ class LiveChargeController:
         self.charging_power = (entry.data.get(CONF_CHARGING_POWER)
                                or discover_charging_power_entity(hass, self.battery))
         self.plug = discover_plug_entity(hass, self.battery)
-        # The optional wallbox display is deliberately isolated from control.
-        # It can never change schedule, safety, ownership or stop decisions.
-        self.wallbox_power = "sensor.tesla_wall_connector_total_power"
+        # Wallbox settings are read dynamically from config/options. Existing
+        # installations remain Geely-only until explicitly opted in.
         # Manual charging is a normal user action, not a staged armed test.
         # 'armed' only remains for compatibility with existing pure policy.
         self.armed = False
@@ -112,13 +111,43 @@ class LiveChargeController:
     def _guards(self):
         return {key: self._raw(key) for key in MONITORED_GUARDS}
 
+    def _charger_setting(self, key, default=None):
+        return self.entry.options.get(key, self.entry.data.get(key, default))
+
+    @property
+    def wallbox_power(self):
+        # Preserve legacy Tesla display only; never silently opt into control.
+        return self._charger_setting("charger_power_entity") or "sensor.tesla_wall_connector_total_power"
+
     def _wallbox_kw(self):
-        """Optional power confirmation. No wallbox API calls are ever issued."""
+        state = self._state(self.wallbox_power)
+        if state is None:
+            return None
         try:
-            value = float(self._raw(self.wallbox_power))
+            value = float(state.state)
+            unit = getattr(state, "attributes", {}).get("unit_of_measurement")
+            if unit == "W":
+                value /= 1000
+            elif unit != "kW":
+                return None
             return value if isfinite(value) and value >= 0 else None
         except (ValueError, TypeError):
             return None
+
+    def assisted_charging(self):
+        """Fresh dedicated-charger power can trigger ONLY an unexpected STOP."""
+        if not (self._charger_setting("charger_assist_enabled", False) is True
+                and self._charger_setting("charger_exclusive_confirmed", False) is True
+                and self._charger_setting("charger_power_entity")):
+            return False
+        state = self._state(self.wallbox_power)
+        stamp = (getattr(state, "last_reported", None)
+                 or getattr(state, "last_updated", None))
+        if not isinstance(stamp, datetime) or stamp.tzinfo is None:
+            return False
+        age = (dt_util.utcnow() - stamp).total_seconds()
+        power = self._wallbox_kw()
+        return 0 <= age <= 120 and power is not None and power >= 1.0
 
     def vehicle_activity(self):
         """Vehicle activity based exclusively on Geely reports."""
@@ -302,6 +331,9 @@ class LiveChargeController:
             entities.append(self.charging_power)
         if self.plug:
             entities.append(self.plug)
+        # Charger events are separate from the Geely event path. A display
+        # sensor alone must not trigger any charging or climate decisions.
+        selected_charger = self._charger_setting("charger_power_entity")
         @callback
         def changed(_event):
             self._observe_unmanaged()
@@ -331,6 +363,16 @@ class LiveChargeController:
         self._unsubs.append(
             async_track_time_interval(self.hass, periodic, timedelta(seconds=15))
         )
+        if selected_charger:
+            @callback
+            def charger_changed(_event):
+                if (self._charger_setting("charger_assist_enabled", False) is True
+                        and self._charger_setting("charger_exclusive_confirmed", False) is True
+                        and self._charger_setting("charger_power_entity") == selected_charger):
+                    self.hass.async_create_task(self.auto.async_tick())
+            self._unsubs.append(
+                async_track_state_change_event(self.hass, [selected_charger], charger_changed)
+            )
 
     async def async_arm(self, enabled):
         """Legacy HA helper method; no arming or test entity is exposed."""
