@@ -111,6 +111,17 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.auto = Auto(self.manual)
 
+    async def test_mode_change_does_not_duplicate_pending_target_stop(self):
+        await self.auto.async_set_mode("Active")
+        self.values["sensor.battery"] = "80"
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertEqual(self.auto.stop_attempts, 1)
+        await self.auto.async_set_mode("Off", deliberate=False)
+        self.assertEqual(self.services.calls, ["turn_on", "turn_off"])
+        self.assertEqual(self.auto.stop_attempts, 1)
+        self.assertEqual(self.auto.stop_context, "Scheduled battery target reached")
+
     async def test_normal_target_stop_only_pushes_one_finished_summary(self):
         notices = []
         self.manual.push = SimpleNamespace(

@@ -2,9 +2,17 @@
 
 An early **experimental integration** for Home Assistant, designed for the **Geely EX5** using community Geely Connect telemetry. Other Geely models have not been verified.
 
-**Current build (v0.3.22 — one concise charging-finish push, quiet intermediate STOP states; vehicle validation ongoing):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Charging-linked Cool/Warm runs whenever the specific EV Control departure day's comfort is enabled alongside its charging schedule. The separate Independent climate schedules enabled switch controls only the seven appointments on Climate Scheduler. Both functions retain manual climate priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
+**Current build (v0.3.23 — preserve automatic mode during pending STOP and prevent redundant stop commands; vehicle validation ongoing):** Automatic charging is a persistent user setting, no developer Off/Monitor/Active or arm-test controls are exposed. The controller restores scheduled-charge ownership and completion history after Home Assistant restart rather than issuing a blind START. A manual charge temporarily pauses the automatic controller and restores the previously enabled preference after its confirmed end; releasing Emergency Stop restores that preference only if it was enabled. Charging-linked Cool/Warm runs whenever the specific EV Control departure day's comfort is enabled alongside its charging schedule. The separate Independent climate schedules enabled switch controls only the seven appointments on Climate Scheduler. Both functions retain manual climate priority and saved session ownership. **This is still a pre-release: verify restart recovery and climate on your own vehicle before relying on unattended operation.** Disable old charging and automatic climate controllers before testing. See [the v0.3.11 integration test plan](docs/persistent-auto-live-climate-test.md).
 
 **Public charging responsibility:** Turn **Public charging mode ON before connecting to any public charger**, and turn it OFF when returning to normal automatic charging. The integration does not detect home location or public charging automatically. When ON, automatic charging starts, unexpected-charge stops and manual charging commands from this integration are suppressed. The native switch persists across Home Assistant restarts. Existing `input_boolean.ev_public_charging_mode` installations are still honoured as an additional interlock, so both must be OFF to resume normal charging. The optional Tesla Wall Connector is never required for core control.
+
+## Pending STOP reconciliation (v0.3.23)
+
+A pending automatic STOP no longer temporarily disables automatic control.
+Mode changes cannot send a duplicate STOP while one is already pending.
+The original stop reason, retry budget, and verification requirements remain
+intact. This addresses a likely source of the misleading "disabled by user"
+event and premature warning observed during the successful 25 Nov 80% charge.
 
 ## Charging completion notifications (v0.3.22)
 

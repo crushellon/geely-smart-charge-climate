@@ -373,8 +373,10 @@ class AutomaticChargeController:
                 # Never stop a public charge, even on a mode change.
                 if self._public_mode():
                     self._release("BLOCKED", "Public charging mode; session released")
-                else:
+                elif self.stop_requested_at is None:
                     await self._request_stop("Automatic control disabled by user")
+                # A pending STOP already has its original reason and retry
+                # budget. Mode reconciliation must not send another command.
             elif self.stop_requested_at is None:
                 self._update(
                     "OFF" if mode == "Off" else "MONITORING",
