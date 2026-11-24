@@ -354,7 +354,10 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         })
         state = SimpleNamespace(state="6900", attributes={"unit_of_measurement": "W"},
                                 last_reported=datetime.now(timezone.utc))
-        self.states.data[sensor] = state
+        # The default fake state getter fabricates future timestamps and
+        # discards attributes. Preserve the real charger fixture here.
+        old_get = self.states.get
+        self.states.get = lambda entity: state if entity == sensor else old_get(entity)
         self.assertTrue(self.controller.assisted_charging())
         self.assertAlmostEqual(self.controller._wallbox_kw(), 6.9)
         state.state = "160"

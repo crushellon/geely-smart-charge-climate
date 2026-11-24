@@ -367,8 +367,25 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         self.values["binary_sensor.plug"] = "off"
         self.auto.mode = "Active"
         await self.auto.async_tick()
+        # 06:00 is inside the configured Monday window. Wallbox power alone
+        # cannot authorize START or ownership, nor request STOP in-window.
+        await self.auto.async_tick()
         self.assertEqual(self.services.calls, [])
         self.assertFalse(self.auto.owned)
+        self.assertIsNone(self.auto.unexpected_since)
+
+    async def test_dedicated_charger_cannot_stop_manual_or_disabled_controller(self):
+        global now
+        now = datetime(2026, 11, 22, 20, tzinfo=ZoneInfo("Australia/Brisbane"))
+        self.values["binary_sensor.plug"] = "off"
+        self.manual.assisted_charging = lambda: True
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, [])
+        self.auto.mode = "Active"
+        self.manual.owned = True
+        await self.auto.async_tick()
+        self.assertEqual(self.services.calls, [])
+        self.assertIsNone(self.auto.unexpected_since)
 
     async def test_optional_wallbox_cannot_claim_charging_when_geely_is_off(self):
         self.manual._wallbox_kw = lambda: 6.89
