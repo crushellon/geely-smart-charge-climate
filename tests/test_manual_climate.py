@@ -89,9 +89,46 @@ class ManualClimateTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(("select", "select_option", {
             "entity_id": self.vehicle["passenger_vent"], "option": "Low",
         }), self.services.calls)
-        self.assertIn(("switch", "turn_off", {
+        self.assertNotIn(("switch", "turn_off", {
             "entity_id": self.vehicle["steering"],
         }), self.services.calls)
+        self.assertNotIn(("select", "select_option", {
+            "entity_id": self.vehicle["driver_heat"], "option": "Off",
+        }), self.services.calls)
+
+    async def test_busy_command_retries_and_succeeds(self):
+        original = self.services.async_call
+        attempts = []
+        async def busy_once(domain, action, data, blocking):
+            attempts.append(data["entity_id"])
+            if len(attempts) == 1:
+                raise RuntimeError("The last request has not yet been executed, please send the command later!")
+            await original(domain, action, data, blocking)
+        self.services.async_call = busy_once
+        self.assertTrue(await self.control.apply("Cool"))
+        self.assertEqual(attempts[:2], [self.vehicle["climate"]] * 2)
+
+    async def test_partial_seat_failure_is_not_success(self):
+        original = self.services.async_call
+        async def fail_driver(domain, action, data, blocking):
+            if data["entity_id"] == self.vehicle["driver_vent"]:
+                raise RuntimeError("The last request has not yet been executed, please send the command later!")
+            await original(domain, action, data, blocking)
+        self.services.async_call = fail_driver
+        self.assertFalse(await self.control.apply("Cool"))
+        self.assertEqual(self.control.status, "ERROR")
+        self.assertFalse(await self.control.apply_scheduled({
+            "temperature": 16, "driver_seat": "Vent High",
+            "passenger_seat": "Vent Low", "steering_heat": False,
+        }))
+        self.assertFalse(await self.control.stop_scheduled())
+
+    async def test_off_confirmation_checks_every_actuator(self):
+        self.assertTrue(self.control.off_confirmed())
+        self.hass.states.get = lambda ent: SimpleNamespace(
+            state="High" if ent == self.vehicle["driver_vent"] else "off"
+        )
+        self.assertFalse(self.control.off_confirmed())
 
     async def test_warm_heats_both_seats_and_steering(self):
         await self.control.apply("Warm")

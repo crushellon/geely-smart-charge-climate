@@ -516,6 +516,10 @@ class ScheduledClimateTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(3):
             await self.controller.async_tick()
         self.assertEqual([x[0] for x in self.climate.calls], ["on"])
+        self.assertTrue(self.controller.active["apply_failed"])
+        clock["now"] += timedelta(minutes=36)
+        await self.controller.async_tick()
+        self.assertEqual([x[0] for x in self.climate.calls], ["on", "off"])
 
 
 if __name__ == "__main__":
