@@ -331,10 +331,9 @@ class LiveChargeController:
             entities.append(self.charging_power)
         if self.plug:
             entities.append(self.plug)
-        # A selected charger gets event-driven checks after setup; changes
-        # in Configure also take effect via the existing 15-second timer.
-        if self._charger_setting("charger_power_entity"):
-            entities.append(self.wallbox_power)
+        # Charger events are separate from the Geely event path. A display
+        # sensor alone must not trigger any charging or climate decisions.
+        selected_charger = self._charger_setting("charger_power_entity")
         @callback
         def changed(_event):
             self._observe_unmanaged()
@@ -364,6 +363,16 @@ class LiveChargeController:
         self._unsubs.append(
             async_track_time_interval(self.hass, periodic, timedelta(seconds=15))
         )
+        if selected_charger:
+            @callback
+            def charger_changed(_event):
+                if (self._charger_setting("charger_assist_enabled", False) is True
+                        and self._charger_setting("charger_exclusive_confirmed", False) is True
+                        and self._charger_setting("charger_power_entity") == selected_charger):
+                    self.hass.async_create_task(self.auto.async_tick())
+            self._unsubs.append(
+                async_track_state_change_event(self.hass, [selected_charger], charger_changed)
+            )
 
     async def async_arm(self, enabled):
         """Legacy HA helper method; no arming or test entity is exposed."""
