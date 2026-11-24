@@ -345,6 +345,27 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.controller.auto.mode, "Off")
         self.assertEqual(self.services.calls, [])
 
+    async def test_dedicated_charger_requires_opt_in_freshness_and_meaningful_power(self):
+        sensor = "sensor.test_charger"
+        self.controller.entry.options.update({
+            "charger_power_entity": sensor,
+            "charger_assist_enabled": True,
+            "charger_exclusive_confirmed": True,
+        })
+        state = SimpleNamespace(state="6900", attributes={"unit_of_measurement": "W"},
+                                last_reported=datetime.now(timezone.utc))
+        self.states.data[sensor] = state
+        self.assertTrue(self.controller.assisted_charging())
+        self.assertAlmostEqual(self.controller._wallbox_kw(), 6.9)
+        state.state = "160"
+        self.assertFalse(self.controller.assisted_charging())
+        state.state = "6900"
+        state.last_reported -= timedelta(minutes=3)
+        self.assertFalse(self.controller.assisted_charging())
+        state.last_reported = datetime.now(timezone.utc)
+        self.controller.entry.options["charger_exclusive_confirmed"] = False
+        self.assertFalse(self.controller.assisted_charging())
+
     async def test_wallbox_power_does_not_affect_manual_stop_confirmation(self):
         self.states.data["sensor.tesla_wall_connector_total_power"] = SimpleNamespace(
             state="0"

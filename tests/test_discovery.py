@@ -72,7 +72,7 @@ class DiscoveryStaticTests(unittest.TestCase):
         flow = next(node for node in tree.body if isinstance(node, ast.ClassDef)
                     and node.name == "GeelySmartChargeClimateConfigFlow")
         names = {node.name for node in flow.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
-        self.assertNotIn("async_get_options_flow", names)
+        self.assertIn("async_get_options_flow", names)
         init = (ROOT / "__init__.py").read_text(encoding="utf-8")
         for platform in ("SWITCH", "NUMBER", "TIME"):
             self.assertIn(f"Platform.{platform}", init)

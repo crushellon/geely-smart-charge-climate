@@ -147,7 +147,12 @@ class AutomaticChargeController:
 
     def _stopped(self):
         power = self._power()
-        # Geely state is the sole stop authority. No wallbox-dependent policy.
+        # A fresh positive dedicated charger reading prevents a false
+        # confirmation of an assisted STOP, but a missing reading falls
+        # back to Geely. Normal Geely-only stops remain unchanged.
+        if (self.stop_context == "Unauthorised charging at home (charger-assisted)"
+                and getattr(self.manual, "assisted_charging", lambda: False)()):
+            return False
         return (
             self._stop_telemetry_fresh()
             and self._raw(self.manual.charging_switch) == "off"
@@ -223,12 +228,14 @@ class AutomaticChargeController:
             pass
         return DEFAULT_EFFECTIVE_KW
 
-    def _policy(self):
+    def _policy(self, charger_assisted=False):
         return decide(
             now=dt_util.now(),
             schedule=self.entry.options.get("weekly_schedule", {}),
-            soc=self._soc(), charging=self._charging(),
-            plugged=self._raw(self.manual.plug) == "on" if self.manual.plug else None,
+            soc=self._soc(), charging=True if charger_assisted else self._charging(),
+            plugged=True if charger_assisted else (
+                self._raw(self.manual.plug) == "on" if self.manual.plug else None
+            ),
             rate_kw=self._effective_kw(),
             capacity_kwh=DEFAULT_USABLE_CAPACITY_KWH,
             public_mode=self._public_mode(),
@@ -857,6 +864,19 @@ class AutomaticChargeController:
 
             # The normal manual control takes priority over the schedule.
             policy = self._policy()
+            assisted = False
+            # Explicit dedicated-wallbox opt-in permits early detection even
+            # while the Geely plug/charging reports are still stale. Never
+            # use wallbox data to START, adopt ownership, or extend a charge.
+            if (self.mode == "Active" and not self.manual.owned
+                    and not self.manual.armed and self._legacy_clear()
+                    and self._raw(self.manual.charging_switch) in ("on", "off")
+                    and getattr(self.manual, "assisted_charging", lambda: False)()):
+                candidate = self._policy(charger_assisted=True)
+                if (candidate.action == "STOP"
+                        and candidate.reason == "Unexpected charging outside authorised schedule"):
+                    policy = candidate
+                    assisted = True
             # The visible decision must refresh even if the status text stays
             # unchanged (for example, a target edit during WAIT/CHARGING).
             if policy != self.decision:
@@ -956,10 +976,14 @@ class AutomaticChargeController:
                 if self.unexpected_since is None:
                     self.unexpected_since = dt_util.utcnow()
                     self._update("CHECKING", f"Checking charging authorisation: {policy.reason}", policy)
-                    self._notice("unexpected", f"Unexpected charging detected: {policy.reason}")
+                    source = " (dedicated charger)" if assisted else ""
+                    self._notice("unexpected", f"Unexpected charging detected{source}: {policy.reason}")
                     return
                 if dt_util.utcnow() - self.unexpected_since >= UNEXPECTED_GRACE:
-                    await self._request_stop("Unauthorised charging at home")
+                    await self._request_stop(
+                        "Unauthorised charging at home (charger-assisted)"
+                        if assisted else "Unauthorised charging at home"
+                    )
                 return
 
             self.unexpected_since = None

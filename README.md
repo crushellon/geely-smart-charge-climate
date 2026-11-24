@@ -6,6 +6,25 @@ An early **experimental integration** for Home Assistant, designed for the **Gee
 
 **Public charging responsibility:** Turn **Public charging mode ON before connecting to any public charger**, and turn it OFF when returning to normal automatic charging. The integration does not detect home location or public charging automatically. When ON, automatic charging starts, unexpected-charge stops and manual charging commands from this integration are suppressed. The native switch persists across Home Assistant restarts. Existing `input_boolean.ev_public_charging_mode` installations are still honoured as an additional interlock, so both must be OFF to resume normal charging. The optional Tesla Wall Connector is never required for core control.
 
+## Optional dedicated charger assistance (v0.3.20)
+
+Geely-only remains the default and requires no charger integration. Geely's
+adaptive polling can delay detection of unexpected charging for several
+minutes. In setup or Configure, optionally select a charger power sensor in
+W or kW, enable assistance, and confirm that the charger is dedicated to
+this Geely. A shared charger cannot identify which vehicle is connected;
+incorrect STOP commands may result. Leave assistance disabled for shared
+chargers. Public Charging Mode and manual/automatic ownership retain priority.
+
+A fresh reading of at least 1 kW (reported within 120 seconds) can trigger
+the existing 30-second unexpected-charge grace and a Geely STOP even before
+Geely reports the plug or charging state. It cannot authorise START, adopt
+ownership, affect rate learning, or control the charger. Fresh positive
+power prevents premature verification of an assisted STOP; missing charger
+data falls back to Geely. Existing installations must opt in explicitly.
+Settings are changeable without losing weekly schedules; restart to subscribe
+to a newly selected power sensor immediately (the periodic check also reads it).
+
 ## Geely-only control and learning reset (v0.3.19)
 
 The Tesla Wall Connector is now display-only. Its power reading is never

@@ -560,6 +560,9 @@ class VehicleChargingStatusSensor(GeelyObservedBase):
             "geely_charging_switch": runtime._raw(runtime.charging_switch),
             "geely_power_kw": geely_power,
             "wallbox_power_kw": runtime._wallbox_kw(),
+            "charger_assist_enabled": runtime._charger_setting("charger_assist_enabled", False),
+            "charger_assist_source": runtime._charger_setting("charger_power_entity"),
+            "charger_assist_active": runtime.assisted_charging(),
             "source": ("Geely charging power"
                        if activity == "CHARGING" else "Geely charging switch"
                        if activity == "CHARGING_REPORTED" else "Geely telemetry"),
