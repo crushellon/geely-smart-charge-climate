@@ -439,6 +439,13 @@ class LiveControllerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.services.calls, [])
         self.assertEqual(self.controller.auto.stop_watch_until, watch)
 
+    async def test_pending_automatic_stop_keeps_enabled_mode(self):
+        self.controller.entry.options["automatic_charging_enabled"] = True
+        self.controller.auto.mode = "Active"
+        self.controller.auto.stop_requested_at = datetime.now(timezone.utc)
+        await self.controller.async_reconcile_automatic()
+        self.assertEqual(self.controller.auto.mode, "Active")
+
     async def test_manual_start_waits_for_pending_automatic_stop_confirmation(self):
         self.controller.auto.stop_requested_at = datetime.now(timezone.utc)
         await self.controller.async_start_manual(80)

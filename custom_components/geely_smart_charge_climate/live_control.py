@@ -274,7 +274,11 @@ class LiveChargeController:
         self._observe_unmanaged()
         wanted = self.entry.options.get("automatic_charging_enabled", False) is True
         blocked = (self.owned or self.stop_requested_at is not None
-                   or self.auto.stop_requested_at is not None
+                   # A normal automatic STOP must not switch Active to Off.
+                   # But an already disabled controller (e.g. emergency
+                   # release) stays Off until its pending STOP is verified.
+                   or (self.auto.stop_requested_at is not None
+                       and self.auto.mode != "Active")
                    or self.unmanaged_charge
                    or self.public_mode()
                    or self.entry.options.get("emergency_stop", False) is True)
