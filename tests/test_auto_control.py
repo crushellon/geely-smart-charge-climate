@@ -111,6 +111,44 @@ class AutoControllerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.auto = Auto(self.manual)
 
+    async def test_normal_target_stop_only_pushes_one_finished_summary(self):
+        notices = []
+        self.manual.push = SimpleNamespace(
+            emit=lambda *args: notices.append(("alert", args)),
+            charging_ended=lambda **kw: notices.append(("ended", kw)),
+        )
+        await self.auto.async_set_mode("Active")
+        self.values["sensor.battery"] = "80"
+        await self.auto.async_tick()
+        self.assertEqual(notices, [])
+        await self.auto.async_tick()
+        await self.auto.async_tick()
+        self.assertEqual([v[0] for v in notices], ["ended"])
+        self.assertEqual(notices[0][1]["end_soc"], 80)
+
+    async def test_delayed_stop_feedback_does_not_push_early_warning(self):
+        notices = []
+        self.manual.push = SimpleNamespace(
+            emit=lambda *args: notices.append(args),
+            charging_ended=lambda **kw: None,
+        )
+        await self.auto.async_set_mode("Active")
+        self.values["sensor.battery"] = "80"
+        await self.auto.async_tick()
+        self.auto.stop_attempts = 3
+        self.auto.stop_started_at -= timedelta(minutes=2)
+        self.auto.stop_requested_at -= timedelta(seconds=31)
+        self.values["switch.car"] = "on"
+        self.values["sensor.power"] = "6.5"
+        await self.auto.async_tick()
+        self.assertEqual(notices, [])
+        self.auto.stop_started_at -= timedelta(minutes=3)
+        await self.auto.async_tick()
+        self.assertEqual(len(notices), 1)
+        self.assertIn("5 minutes", notices[0][2])
+        await self.auto.async_tick()
+        self.assertEqual(len(notices), 1)
+
     async def test_80_percent_hard_stop_at_exact_ready_by_even_below_target(self):
         global now
         await self.auto.async_set_mode("Active")
