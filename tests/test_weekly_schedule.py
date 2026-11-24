@@ -30,6 +30,20 @@ class WeeklyScheduleTests(unittest.TestCase):
         self.assertEqual(next_day.target, 100)
         self.assertEqual(next_day.ready_by, datetime(2026, 11, 22, 6, 30, tzinfo=self.tz))
 
+    def test_shift_worker_3am_deadline_belongs_to_tuesday(self):
+        now = datetime(2026, 11, 23, 21, tzinfo=self.tz)  # Monday evening
+        self.schedule["tuesday"] = {"enabled": True, "target": 80, "ready_time": "03:00"}
+        event = module.next_charge(now, self.schedule)
+        self.assertEqual(event.day, "tuesday")
+        self.assertEqual(event.ready_by, datetime(2026, 11, 24, 3, tzinfo=self.tz))
+
+    def test_evening_deadline_stays_on_same_calendar_day(self):
+        now = datetime(2026, 11, 25, 16, tzinfo=self.tz)  # Wednesday afternoon
+        self.schedule["wednesday"] = {"enabled": True, "target": 80, "ready_time": "22:00"}
+        event = module.next_charge(now, self.schedule)
+        self.assertEqual(event.day, "wednesday")
+        self.assertEqual(event.ready_by, datetime(2026, 11, 25, 22, tzinfo=self.tz))
+
     def test_past_deadline_rolls_to_next_week(self):
         self.schedule["saturday"] = {"enabled": True, "target": 80, "ready_time": "06:30"}
         deadline = module.next_charge(self.now, self.schedule).ready_by
