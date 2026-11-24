@@ -41,31 +41,63 @@ class ManualClimateController:
         self.message = "Manual cabin climate ready"
         self._lock = asyncio.Lock()
 
-    async def _request(self, domain, service, entity, **data):
+    def _reported_off(self, entity):
+        state = self.hass.states.get(entity) if entity else None
+        return state is not None and str(state.state).lower() == "off"
+
+    def off_confirmed(self):
+        """Every EX5 comfort actuator must report OFF, not only the cabin."""
+        return bool(self.entities) and all(
+            self._reported_off(entity) for entity in self.entities.values()
+        )
+
+    async def _request(self, domain, service, entity, *, skip_off=False, **data):
         state = self.hass.states.get(entity) if entity else None
         if state is None or state.state in ("unknown", "unavailable"):
             return False
-        try:
-            await self.hass.services.async_call(
-                domain, service, {"entity_id": entity, **data}, blocking=True,
-            )
-        except Exception:
-            _LOGGER.exception("Manual Geely climate command failed for %s", entity)
-            return False
-        return True
+        # Only skip redundant OFF commands during activation. Shutdown
+        # always sends explicit OFF, even when cached telemetry says OFF.
+        if skip_off and self._reported_off(entity):
+            return True
+        for attempt in range(3):
+            try:
+                await self.hass.services.async_call(
+                    domain, service, {"entity_id": entity, **data}, blocking=True,
+                )
+            except Exception as exc:
+                # This exact Geely rejection means the previous vehicle
+                # request is still executing. Retry only this known transient
+                # condition; do not blindly resend unrelated failures.
+                if ("last request has not yet been executed" in str(exc).lower()
+                        and attempt < 2):
+                    await asyncio.sleep(5 * (attempt + 1))
+                    continue
+                _LOGGER.exception("Geely climate command failed for %s", entity)
+                # Even a failed response may leave a prior request executing.
+                await asyncio.sleep(3)
+                return False
+            # A cloud acknowledgement is not execution. Pace every write,
+            # including each individual seat mode and steering command.
+            await asyncio.sleep(3)
+            return True
+        return False
 
-    async def _seat(self, side, setting):
+    async def _seat(self, side, setting, *, activating=False):
         heat = self.entities[f"{side}_heat"]
         vent = self.entities[f"{side}_vent"]
         mode, _, level = setting.partition(" ")
         if mode == "Heat" and level in ("Low", "Medium", "High"):
-            await self._request("select", "select_option", vent, option="Off")
-            return await self._request("select", "select_option", heat, option=level)
+            opposite = await self._request(
+                "select", "select_option", vent, option="Off", skip_off=activating
+            )
+            return opposite and await self._request("select", "select_option", heat, option=level)
         if mode == "Vent" and level in ("Low", "Medium", "High"):
-            await self._request("select", "select_option", heat, option="Off")
-            return await self._request("select", "select_option", vent, option=level)
-        left = await self._request("select", "select_option", heat, option="Off")
-        right = await self._request("select", "select_option", vent, option="Off")
+            opposite = await self._request(
+                "select", "select_option", heat, option="Off", skip_off=activating
+            )
+            return opposite and await self._request("select", "select_option", vent, option=level)
+        left = await self._request("select", "select_option", heat, option="Off", skip_off=activating)
+        right = await self._request("select", "select_option", vent, option="Off", skip_off=activating)
         # BOTH heating and ventilation must report a successful OFF
         # service request; a missing seat control is not proof of shutdown.
         return left and right
@@ -86,30 +118,23 @@ class ManualClimateController:
             )
             if not main:
                 return False
-            # Geely Connect sends asynchronous cloud commands. Leave a small
-            # gap as in the original working package before seat commands.
-            await asyncio.sleep(5)
-            await self._seat("driver", settings["driver_seat"])
-            await asyncio.sleep(2)
-            await self._seat("passenger", settings["passenger_seat"])
-            await self._request(
+            driver = await self._seat("driver", settings["driver_seat"], activating=True)
+            passenger = await self._seat("passenger", settings["passenger_seat"], activating=True)
+            wheel = await self._request(
                 "switch", "turn_on" if settings["steering_heat"] else "turn_off",
-                self.entities["steering"],
+                self.entities["steering"], skip_off=not settings["steering_heat"],
             )
-            return True
+            return main and driver and passenger and wheel
 
     async def stop_scheduled(self):
         """Turn off scheduled cabin, both seats and wheel without touching EV charging."""
         async with self._lock:
             climate = self.entities.get("climate")
-            if not climate:
-                return False
             main = await self._request("climate", "turn_off", climate)
-            await asyncio.sleep(2)
-            await self._seat("driver", "Off")
-            await self._seat("passenger", "Off")
-            await self._request("switch", "turn_off", self.entities["steering"])
-            return main
+            driver = await self._seat("driver", "Off")
+            passenger = await self._seat("passenger", "Off")
+            wheel = await self._request("switch", "turn_off", self.entities["steering"])
+            return main and driver and passenger and wheel
 
     async def apply(self, action):
         """Apply Cool/Warm/custom/off only when explicitly requested."""
@@ -150,21 +175,20 @@ class ManualClimateController:
                     temperature=float(temp), hvac_mode="heat_cool",
                 )
                 if main_ok and action in ("Cool", "Warm"):
-                    # Geely's climate command can take time to propagate. The
-                    # original package staggered these separate cloud writes.
-                    await asyncio.sleep(5)
-                    await self._seat(
-                        "driver", get_seat_mode(self.entry.options, action.lower(), "driver")
+                    driver_ok = await self._seat(
+                        "driver", get_seat_mode(self.entry.options, action.lower(), "driver"),
+                        activating=True,
                     )
-                    await asyncio.sleep(2)
-                    await self._seat(
-                        "passenger", get_seat_mode(self.entry.options, action.lower(), "passenger")
+                    passenger_ok = await self._seat(
+                        "passenger", get_seat_mode(self.entry.options, action.lower(), "passenger"),
+                        activating=True,
                     )
                     wheel = bool(get_value(self.entry.options, action.lower(), "steering_heat"))
-                    await self._request(
+                    wheel_ok = await self._request(
                         "switch", "turn_on" if wheel else "turn_off",
-                        self.entities["steering"],
+                        self.entities["steering"], skip_off=not wheel,
                     )
+                    main_ok = main_ok and driver_ok and passenger_ok and wheel_ok
             self.status = "REQUESTED" if main_ok else "ERROR"
             self.message = (
                 f"Manual {action} climate commands sent; vehicle feedback pending"

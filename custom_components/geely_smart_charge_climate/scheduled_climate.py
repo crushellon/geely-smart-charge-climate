@@ -182,7 +182,10 @@ class ScheduledClimateController:
             return
         climate = self.manual.climate.entities.get("climate")
         observed = self.manual._raw(climate)
-        if observed == "off":
+        # Check cabin, seat heating/ventilation and steering individually.
+        # The fallback supports older isolated controller test adapters.
+        check = getattr(self.manual.climate, "off_confirmed", None)
+        if (check() if check is not None else observed == "off"):
             self._pending_stop_verification = None
             self._persist(climate_pending_stop_verification=None)
             return
@@ -202,7 +205,7 @@ class ScheduledClimateController:
                 vehicle_state=observed, success=False,
             )
         self.status = "ERROR"
-        self.message = "Scheduled cabin OFF unconfirmed after 90 seconds; check car"
+        self.message = "Scheduled comfort OFF unconfirmed after 90 seconds; check cabin, seats and wheel"
         self.manual._notify()
 
     async def async_tick(self):
@@ -342,16 +345,23 @@ class ScheduledClimateController:
                         if success:
                             self.active = {
                                 **self.active, "settings": new,
-                                "last_applied_at": now.isoformat(),
+                                "last_applied_at": now.isoformat(), "apply_failed": False,
                             }
                             self._persist(scheduled_climate_session=self.active)
                         else:
+                            self.active = {**self.active, "settings": new,
+                                           "last_applied_at": now.isoformat(),
+                                           "apply_failed": True}
+                            self._persist(scheduled_climate_session=self.active)
+                            self._push_climate("on", self.active, success=False)
                             self.status = "ERROR"
                             self.message = "Unable to apply updated scheduled comfort"
                             self.manual._notify()
                             return
-                    self.status = "RUNNING"
-                    self.message = f"Scheduled cabin comfort active: {key}"
+                    self.status = "ERROR" if self.active.get("apply_failed") else "RUNNING"
+                    self.message = (f"Scheduled comfort partially unconfirmed: {key}"
+                                    if self.active.get("apply_failed") else
+                                    f"Scheduled cabin comfort active: {key}")
                     self.manual._notify()
                     return
 
@@ -374,9 +384,14 @@ class ScheduledClimateController:
                         self.status = "RUNNING"
                         self._push_climate("on", self.active)
                     else:
-                        self.active = None
-                        self._mark_finished(key)
+                        # Some commands may already have reached the car.
+                        # Keep ownership until expiry; do not spam ON retries.
+                        self.active = {**self.active, "applied": True,
+                                       "apply_failed": True}
+                        self._persist(scheduled_climate_session=self.active)
                         self.status = "ERROR"
+                        self.message = f"Recovered comfort commands unconfirmed: {key}"
+                        self._push_climate("on", self.active, success=False)
                     self.manual._notify()
                     return
 
@@ -384,24 +399,21 @@ class ScheduledClimateController:
                 # emergency interlock engaged. Never stop a manual override.
                 finished = dict(self.active)
                 success = await self.manual.climate.stop_scheduled()
-                if not success:
-                    self._push_climate("off", finished, success=False)
-                else:
-                    pending = {
-                        "key": finished["key"], "kind": finished["kind"],
-                        "deadline": (
-                            dt_util.now() + SCHEDULED_OFF_VERIFY
-                        ).isoformat(),
-                    }
-                    self._pending_stop_verification = pending
-                    self._persist(climate_pending_stop_verification=pending)
+                # Verify actual reported OFF even when an individual cloud
+                # acknowledgement failed; a late execution can still succeed.
+                pending = {
+                    "key": finished["key"], "kind": finished["kind"],
+                    "deadline": (dt_util.now() + SCHEDULED_OFF_VERIFY).isoformat(),
+                }
+                self._pending_stop_verification = pending
+                self._persist(climate_pending_stop_verification=pending)
                 old_key = self.active["key"]
                 self.active = None
                 self._mark_finished(old_key)
                 self.status = "IDLE" if success else "ERROR"
                 self.message = (
-                    "Scheduled climate finished and cabin off"
-                    if success else "Scheduled climate OFF unconfirmed; check vehicle"
+                    "Scheduled comfort OFF requested; verifying reported states"
+                    if success else "Scheduled comfort OFF partly unconfirmed; verifying reported states"
                 )
                 self.manual._notify()
                 return
@@ -473,10 +485,12 @@ class ScheduledClimateController:
             success = await self.manual.climate.apply_scheduled(settings)
             if not success:
                 key = self.active["key"]
-                self.active = None
-                self._mark_finished(key)
+                # A partial start is still a live occurrence requiring OFF.
+                self.active = {**self.active, "applied": True, "apply_failed": True}
+                self._persist(scheduled_climate_session=self.active)
                 self.status = "ERROR"
-                self.message = f"Geely climate command failed for {key}"
+                self.message = f"Geely comfort commands partially unconfirmed for {key}"
+                self._push_climate("on", self.active, success=False)
                 self.manual._notify()
                 return
             self.active = {

@@ -492,7 +492,8 @@ class LiveChargeController:
             "Vehicle reports climate ON" if reported not in (
                 None, "off", "unknown", "unavailable"
             ) and action != "off" else
-            "Vehicle reports climate OFF" if reported == "off" and action == "off"
+            "Vehicle reports all comfort functions OFF" if action == "off"
+            and getattr(self.climate, "off_confirmed", lambda: False)()
             else "Vehicle report pending"
         )
         label = {

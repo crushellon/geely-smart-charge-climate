@@ -338,10 +338,11 @@ class VehiclePushNotifications:
             # success is silent; this method is called on failed verification.
             if success:
                 return
-            requested = "OFF not confirmed; check the vehicle"
+            requested = "OFF not confirmed; check cabin, seats and steering wheel"
         elif not success:
             requested = "Geely climate command failed; check vehicle"
-        label = "started" if action == "on" else "stopped"
+        label = (("started" if success else "start incomplete") if action == "on"
+                 else "OFF unconfirmed")
         details = (
             f" Cabin {setting['temperature']}°C, driver seat "
             f"{setting['driver_seat']}, passenger seat "
